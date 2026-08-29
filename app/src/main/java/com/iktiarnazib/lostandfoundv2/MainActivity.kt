@@ -34,9 +34,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.vector.ImageVector
+import kotlinx.coroutines.launch
 
 // Data class for Feed Posts
 data class LostFoundPost(
@@ -69,7 +71,7 @@ data class UserData(
 )
 
 // Navigation Routes
-enum class Screen { Login, SignUp, Home, Messages, CreatePost, Profile }
+enum class Screen { Login, SignUp, ForgotPassword, Home, Messages, CreatePost, Profile }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -107,13 +109,17 @@ fun AppNavigator() {
         when (currentScreen) {
             Screen.Login -> LoginScreen(
                 onLoginClick = { currentScreen = Screen.Home },
-                onSignUpClick = { currentScreen = Screen.SignUp }
+                onSignUpClick = { currentScreen = Screen.SignUp },
+                onForgotPasswordClick = { currentScreen = Screen.ForgotPassword }
             )
             Screen.SignUp -> SignUpScreen(
                 onSignUpComplete = { user ->
                     currentUser = user
                     currentScreen = Screen.Home
                 },
+                onBackClick = { currentScreen = Screen.Login }
+            )
+            Screen.ForgotPassword -> ForgotPasswordScreen(
                 onBackClick = { currentScreen = Screen.Login }
             )
             Screen.Home -> HomeScreen(
@@ -262,7 +268,7 @@ fun DrawerItem(icon: ImageVector, text: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun LoginScreen(onLoginClick: () -> Unit, onSignUpClick: () -> Unit) {
+fun LoginScreen(onLoginClick: () -> Unit, onSignUpClick: () -> Unit, onForgotPasswordClick: () -> Unit) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -336,7 +342,7 @@ fun LoginScreen(onLoginClick: () -> Unit, onSignUpClick: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.CenterEnd
         ) {
-            TextButton(onClick = { /* TODO: Forgot Password */ }) {
+            TextButton(onClick = onForgotPasswordClick) {
                 Text("Forgot Password?", color = MaterialTheme.colorScheme.secondary)
             }
         }
@@ -362,6 +368,105 @@ fun LoginScreen(onLoginClick: () -> Unit, onSignUpClick: () -> Unit) {
             Text("Don't have an account?", style = MaterialTheme.typography.bodyMedium)
             TextButton(onClick = onSignUpClick) {
                 Text("Sign Up", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ForgotPasswordScreen(onBackClick: () -> Unit) {
+    var email by remember { mutableStateOf("") }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Forgot Password", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back to Login")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(48.dp))
+
+            // App Logo Image
+            Image(
+                painter = painterResource(id = R.drawable.findoralogo),
+                contentDescription = "App Logo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(100.dp)
+                    .clip(CircleShape)
+            )
+
+            Text(
+                text = "Reset Password",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                ),
+                modifier = Modifier.padding(top = 24.dp, bottom = 8.dp)
+            )
+
+            Text(
+                text = "Enter your email address below and we'll send you a link to reset your password.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 32.dp)
+            )
+
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it },
+                label = { Text("Email Address") },
+                leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = {
+                    // Show the bottom pop-up message
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = "Reset email sent to $email",
+                            duration = SnackbarDuration.Long
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
+                enabled = email.isNotBlank() // Simple validation
+            ) {
+                Text(text = "Send Reset Email", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
         }
     }
