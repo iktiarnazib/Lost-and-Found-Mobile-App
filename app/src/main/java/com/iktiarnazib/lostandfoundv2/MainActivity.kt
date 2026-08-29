@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -27,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -55,8 +58,18 @@ data class MessagePreview(
     val unreadCount: Int = 0
 )
 
+// Data class for User Profile (Manual)
+data class UserData(
+    val name: String = "",
+    val studentId: String = "",
+    val roll: String = "",
+    val semester: String = "",
+    val batch: String = "",
+    val email: String = ""
+)
+
 // Navigation Routes
-enum class Screen { Login, Home, Messages, CreatePost, Profile }
+enum class Screen { Login, SignUp, Home, Messages, CreatePost, Profile }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,6 +92,9 @@ fun AppNavigator() {
     var currentScreen by remember { mutableStateOf(Screen.Login) }
     var isDrawerOpen by remember { mutableStateOf(false) }
 
+    // Global state for current logged-in user
+    var currentUser by remember { mutableStateOf<UserData?>(null) }
+
     val posts = remember {
         mutableStateListOf(
             LostFoundPost(1, "Sarah Johnson", "2h ago", "Lost", "Black Leather Wallet", "Lost near the Science Block cafeteria. Contains my student ID and some cash.", "Science Block"),
@@ -89,7 +105,17 @@ fun AppNavigator() {
 
     Box(modifier = Modifier.fillMaxSize()) {
         when (currentScreen) {
-            Screen.Login -> LoginScreen(onLoginClick = { currentScreen = Screen.Home })
+            Screen.Login -> LoginScreen(
+                onLoginClick = { currentScreen = Screen.Home },
+                onSignUpClick = { currentScreen = Screen.SignUp }
+            )
+            Screen.SignUp -> SignUpScreen(
+                onSignUpComplete = { user ->
+                    currentUser = user
+                    currentScreen = Screen.Home
+                },
+                onBackClick = { currentScreen = Screen.Login }
+            )
             Screen.Home -> HomeScreen(
                 posts = posts,
                 onMessageClick = { currentScreen = Screen.Messages },
@@ -105,6 +131,7 @@ fun AppNavigator() {
                 }
             )
             Screen.Profile -> ProfileScreen(
+                user = currentUser,
                 onMenuClick = { isDrawerOpen = true },
                 onBackClick = { currentScreen = Screen.Home }
             )
@@ -133,6 +160,7 @@ fun AppNavigator() {
             modifier = Modifier.align(Alignment.CenterEnd)
         ) {
             RightDrawerUI(
+                user = currentUser,
                 onHomeClick = {
                     isDrawerOpen = false
                     currentScreen = Screen.Home
@@ -143,6 +171,7 @@ fun AppNavigator() {
                 },
                 onLogoutClick = {
                     isDrawerOpen = false
+                    currentUser = null
                     currentScreen = Screen.Login
                 }
             )
@@ -152,6 +181,7 @@ fun AppNavigator() {
 
 @Composable
 fun RightDrawerUI(
+    user: UserData?,
     onHomeClick: () -> Unit,
     onProfileClick: () -> Unit,
     onLogoutClick: () -> Unit
@@ -169,35 +199,24 @@ fun RightDrawerUI(
         ) {
             // Drawer Header
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
+                // Replaced generic person icon with your logo
+                Image(
+                    painter = painterResource(id = R.drawable.findoralogo),
+                    contentDescription = "App Logo",
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primary,
-                                    MaterialTheme.colorScheme.secondary
-                                )
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Profile Image",
-                        tint = Color.White
-                    )
-                }
+                )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
                     Text(
-                        text = "John Doe",
+                        text = user?.name ?: "Guest User",
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "johndoe@findora.com",
+                        text = user?.email ?: "Not logged in",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -243,7 +262,7 @@ fun DrawerItem(icon: ImageVector, text: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun LoginScreen(onLoginClick: () -> Unit) {
+fun LoginScreen(onLoginClick: () -> Unit, onSignUpClick: () -> Unit) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -256,27 +275,15 @@ fun LoginScreen(onLoginClick: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
+        // App Logo Image
+        Image(
+            painter = painterResource(id = R.drawable.findoralogo),
+            contentDescription = "App Logo",
+            contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(80.dp)
+                .size(120.dp)
                 .clip(CircleShape)
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.secondary
-                        )
-                    )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = "App Logo",
-                tint = Color.White,
-                modifier = Modifier.size(40.dp)
-            )
-        }
+        )
 
         Text(
             text = "Findora",
@@ -353,8 +360,132 @@ fun LoginScreen(onLoginClick: () -> Unit) {
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Don't have an account?", style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = { /* TODO: Navigate to Sign Up */ }) {
+            TextButton(onClick = onSignUpClick) {
                 Text("Sign Up", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SignUpScreen(onSignUpComplete: (UserData) -> Unit, onBackClick: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var id by remember { mutableStateOf("") }
+    var roll by remember { mutableStateOf("") }
+    var semester by remember { mutableStateOf("") }
+    var batch by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    // Validation check
+    val isFormValid = name.isNotBlank() && id.isNotBlank() && roll.isNotBlank() &&
+            semester.isNotBlank() && batch.isNotBlank() && email.isNotBlank() &&
+            password.isNotBlank() && password == confirmPassword
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Create Account", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back to Login")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            OutlinedTextField(
+                value = name, onValueChange = { name = it },
+                label = { Text("Full Name") },
+                leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = id, onValueChange = { id = it },
+                label = { Text("Student ID") },
+                leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null) },
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = roll, onValueChange = { roll = it },
+                label = { Text("Roll Number") },
+                leadingIcon = { Icon(Icons.Default.Numbers, contentDescription = null) },
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = semester, onValueChange = { semester = it },
+                label = { Text("Semester") },
+                leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) },
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = batch, onValueChange = { batch = it },
+                label = { Text("Batch") },
+                leadingIcon = { Icon(Icons.Default.School, contentDescription = null) },
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = email, onValueChange = { email = it },
+                label = { Text("Email") },
+                leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = password, onValueChange = { password = it },
+                label = { Text("Password") },
+                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                trailingIcon = {
+                    val image = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(imageVector = image, contentDescription = if (passwordVisible) "Hide password" else "Show password")
+                    }
+                },
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
+                value = confirmPassword, onValueChange = { confirmPassword = it },
+                label = { Text("Confirm Password") },
+                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(),
+                isError = confirmPassword.isNotBlank() && password != confirmPassword
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+                    val newUser = UserData(name, id, roll, semester, batch, email)
+                    onSignUpComplete(newUser)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                enabled = isFormValid
+            ) {
+                Text(text = "Sign Up", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -367,7 +498,19 @@ fun HomeScreen(posts: List<LostFoundPost>, onMessageClick: () -> Unit, onAddPost
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Findora Feed", fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Logo on the left side of 'Findora Feed'
+                        Image(
+                            painter = painterResource(id = R.drawable.findoralogo),
+                            contentDescription = "App Logo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Findora Feed", fontWeight = FontWeight.Bold)
+                    }
                 },
                 actions = {
                     IconButton(onClick = onMessageClick) {
@@ -377,7 +520,6 @@ fun HomeScreen(posts: List<LostFoundPost>, onMessageClick: () -> Unit, onAddPost
                             Icon(imageVector = Icons.Default.Email, contentDescription = "Messages")
                         }
                     }
-                    // Menu Icon for Right Drawer
                     IconButton(onClick = onMenuClick) {
                         Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu")
                     }
@@ -839,7 +981,7 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScreen(onMenuClick: () -> Unit, onBackClick: () -> Unit) {
+fun ProfileScreen(user: UserData?, onMenuClick: () -> Unit, onBackClick: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -866,7 +1008,8 @@ fun ProfileScreen(onMenuClick: () -> Unit, onBackClick: () -> Unit) {
                 .fillMaxSize()
                 .padding(paddingValues)
                 .background(MaterialTheme.colorScheme.background)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(32.dp))
@@ -897,17 +1040,17 @@ fun ProfileScreen(onMenuClick: () -> Unit, onBackClick: () -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "John Doe",
+                text = user?.name ?: "Guest User",
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.headlineSmall
             )
             Text(
-                text = "Computer Science • Student",
+                text = user?.email ?: "Not logged in",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Stats Row
             Row(
@@ -920,6 +1063,66 @@ fun ProfileScreen(onMenuClick: () -> Unit, onBackClick: () -> Unit) {
                 StatCard(title = "Found", value = "5")
                 StatCard(title = "Returned", value = "3")
             }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Account Details Section
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            ) {
+                Text(
+                    "Account Details",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        ProfileDetailRow(icon = Icons.Default.Badge, label = "Student ID", value = user?.studentId ?: "N/A")
+                        ProfileDetailRow(icon = Icons.Default.Numbers, label = "Roll Number", value = user?.roll ?: "N/A")
+                        ProfileDetailRow(icon = Icons.Default.DateRange, label = "Semester", value = user?.semester ?: "N/A")
+                        ProfileDetailRow(icon = Icons.Default.School, label = "Batch", value = user?.batch ?: "N/A")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileDetailRow(icon: ImageVector, label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Column {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value,
+                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.bodyLarge
+            )
         }
     }
 }
