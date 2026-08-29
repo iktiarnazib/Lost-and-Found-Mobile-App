@@ -3,6 +3,11 @@ package com.iktiarnazib.lostandfoundv2
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -51,7 +56,7 @@ data class MessagePreview(
 )
 
 // Navigation Routes
-enum class Screen { Login, Home, Messages, CreatePost }
+enum class Screen { Login, Home, Messages, CreatePost, Profile }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,10 +76,9 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppNavigator() {
-    // State to handle screen navigation
     var currentScreen by remember { mutableStateOf(Screen.Login) }
+    var isDrawerOpen by remember { mutableStateOf(false) }
 
-    // Global state for posts so the new post appears on the feed
     val posts = remember {
         mutableStateListOf(
             LostFoundPost(1, "Sarah Johnson", "2h ago", "Lost", "Black Leather Wallet", "Lost near the Science Block cafeteria. Contains my student ID and some cash.", "Science Block"),
@@ -83,20 +87,157 @@ fun AppNavigator() {
         )
     }
 
-    when (currentScreen) {
-        Screen.Login -> LoginScreen(onLoginClick = { currentScreen = Screen.Home })
-        Screen.Home -> HomeScreen(
-            posts = posts,
-            onMessageClick = { currentScreen = Screen.Messages },
-            onAddPostClick = { currentScreen = Screen.CreatePost }
-        )
-        Screen.Messages -> MessageScreen(onBackClick = { currentScreen = Screen.Home })
-        Screen.CreatePost -> CreatePostScreen(
-            onBackClick = { currentScreen = Screen.Home },
-            onPostCreated = { newPost ->
-                posts.add(0, newPost) // Add new post to the top of the list
-                currentScreen = Screen.Home // Navigate back to home
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (currentScreen) {
+            Screen.Login -> LoginScreen(onLoginClick = { currentScreen = Screen.Home })
+            Screen.Home -> HomeScreen(
+                posts = posts,
+                onMessageClick = { currentScreen = Screen.Messages },
+                onAddPostClick = { currentScreen = Screen.CreatePost },
+                onMenuClick = { isDrawerOpen = true }
+            )
+            Screen.Messages -> MessageScreen(onBackClick = { currentScreen = Screen.Home })
+            Screen.CreatePost -> CreatePostScreen(
+                onBackClick = { currentScreen = Screen.Home },
+                onPostCreated = { newPost ->
+                    posts.add(0, newPost)
+                    currentScreen = Screen.Home
+                }
+            )
+            Screen.Profile -> ProfileScreen(
+                onMenuClick = { isDrawerOpen = true },
+                onBackClick = { currentScreen = Screen.Home }
+            )
+        }
+
+        // Right-Side Drawer Scrim (Dark overlay)
+        AnimatedVisibility(
+            visible = isDrawerOpen,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable { isDrawerOpen = false }
+            )
+        }
+
+        // Right-Side Drawer UI
+        AnimatedVisibility(
+            visible = isDrawerOpen,
+            enter = slideInHorizontally(initialOffsetX = { it }),
+            exit = slideOutHorizontally(targetOffsetX = { it }),
+            modifier = Modifier.align(Alignment.CenterEnd)
+        ) {
+            RightDrawerUI(
+                onHomeClick = {
+                    isDrawerOpen = false
+                    currentScreen = Screen.Home
+                },
+                onProfileClick = {
+                    isDrawerOpen = false
+                    currentScreen = Screen.Profile
+                },
+                onLogoutClick = {
+                    isDrawerOpen = false
+                    currentScreen = Screen.Login
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun RightDrawerUI(
+    onHomeClick: () -> Unit,
+    onProfileClick: () -> Unit,
+    onLogoutClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(300.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp)
+    ) {
+        Column(modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+        ) {
+            // Drawer Header
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.colorScheme.secondary
+                                )
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Profile Image",
+                        tint = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = "John Doe",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "johndoe@findora.com",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Drawer Items
+            DrawerItem(icon = Icons.Default.Home, text = "Home", onClick = onHomeClick)
+            DrawerItem(icon = Icons.Default.Person, text = "Profile", onClick = onProfileClick)
+
+            Spacer(modifier = Modifier.weight(1f)) // Pushes logout to the bottom
+
+            // Logout Item at the bottom
+            DrawerItem(icon = Icons.Default.Logout, text = "Logout", onClick = onLogoutClick)
+        }
+    }
+}
+
+@Composable
+fun DrawerItem(icon: ImageVector, text: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = text,
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(
+            text = text,
+            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.bodyLarge
         )
     }
 }
@@ -115,7 +256,6 @@ fun LoginScreen(onLoginClick: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // App Logo / Title
         Box(
             modifier = Modifier
                 .size(80.dp)
@@ -154,7 +294,6 @@ fun LoginScreen(onLoginClick: () -> Unit) {
             modifier = Modifier.padding(top = 4.dp, bottom = 32.dp)
         )
 
-        // Email Field
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -168,7 +307,6 @@ fun LoginScreen(onLoginClick: () -> Unit) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Password Field
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
@@ -198,9 +336,8 @@ fun LoginScreen(onLoginClick: () -> Unit) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Login Button
         Button(
-            onClick = { onLoginClick() }, // Triggers navigation to HomeScreen
+            onClick = { onLoginClick() },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
@@ -214,9 +351,7 @@ fun LoginScreen(onLoginClick: () -> Unit) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Don't have an account?", style = MaterialTheme.typography.bodyMedium)
             TextButton(onClick = { /* TODO: Navigate to Sign Up */ }) {
                 Text("Sign Up", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -227,7 +362,7 @@ fun LoginScreen(onLoginClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(posts: List<LostFoundPost>, onMessageClick: () -> Unit, onAddPostClick: () -> Unit) {
+fun HomeScreen(posts: List<LostFoundPost>, onMessageClick: () -> Unit, onAddPostClick: () -> Unit, onMenuClick: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -235,16 +370,16 @@ fun HomeScreen(posts: List<LostFoundPost>, onMessageClick: () -> Unit, onAddPost
                     Text("Findora Feed", fontWeight = FontWeight.Bold)
                 },
                 actions = {
-                    // Top Right Message Icon
                     IconButton(onClick = onMessageClick) {
                         BadgedBox(badge = {
-                            Badge { Text("3") } // Example notification count
+                            Badge { Text("3") }
                         }) {
-                            Icon(
-                                imageVector = Icons.Default.Email,
-                                contentDescription = "Messages"
-                            )
+                            Icon(imageVector = Icons.Default.Email, contentDescription = "Messages")
                         }
+                    }
+                    // Menu Icon for Right Drawer
+                    IconButton(onClick = onMenuClick) {
+                        Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -254,7 +389,6 @@ fun HomeScreen(posts: List<LostFoundPost>, onMessageClick: () -> Unit, onAddPost
             )
         },
         floatingActionButton = {
-            // Modern FAB to add a new post
             FloatingActionButton(
                 onClick = onAddPostClick,
                 shape = CircleShape,
@@ -290,14 +424,12 @@ fun PostCard(post: LostFoundPost) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column {
-            // Header: Avatar, Username, Message Button, Status
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Profile Avatar Placeholder
                 Box(
                     modifier = Modifier
                         .size(40.dp)
@@ -327,7 +459,6 @@ fun PostCard(post: LostFoundPost) {
                     )
                 }
 
-                // Message Button next to username
                 IconButton(
                     onClick = { /* TODO: Direct message user */ },
                     modifier = Modifier.size(36.dp)
@@ -342,7 +473,6 @@ fun PostCard(post: LostFoundPost) {
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                // Lost/Found Badge
                 val badgeColor = if (post.status == "Lost") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
                 Box(
                     modifier = Modifier
@@ -359,7 +489,6 @@ fun PostCard(post: LostFoundPost) {
                 }
             }
 
-            // Image Placeholder (Analog/Social Media look)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -382,7 +511,6 @@ fun PostCard(post: LostFoundPost) {
                 )
             }
 
-            // Post Content
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     text = post.title,
@@ -397,7 +525,6 @@ fun PostCard(post: LostFoundPost) {
                 )
             }
 
-            // Footer Actions (Like, Comment, Share)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -439,7 +566,6 @@ fun PostInteraction(icon: ImageVector, text: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessageScreen(onBackClick: () -> Unit) {
-    // Dummy data for messages
     val messages = remember {
         listOf(
             MessagePreview(1, "Sarah Johnson", "Did you find the wallet near the cafeteria?", "10:30 AM", 2),
@@ -455,10 +581,7 @@ fun MessageScreen(onBackClick: () -> Unit) {
                 title = { Text("Messages", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back to Home"
-                        )
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back to Home")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -490,7 +613,6 @@ fun MessageItem(message: MessagePreview) {
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar
         Box(
             modifier = Modifier
                 .size(48.dp)
@@ -508,7 +630,6 @@ fun MessageItem(message: MessagePreview) {
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        // Username and Preview
         Column(modifier = Modifier.weight(1f)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -539,7 +660,6 @@ fun MessageItem(message: MessagePreview) {
                     maxLines = 1
                 )
 
-                // Unread badge
                 if (message.unreadCount > 0) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Box(
@@ -561,7 +681,6 @@ fun MessageItem(message: MessagePreview) {
         }
     }
 
-    // Divider between messages
     HorizontalDivider(
         modifier = Modifier.padding(start = 80.dp, end = 16.dp),
         thickness = 0.5.dp,
@@ -583,10 +702,7 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
                 title = { Text("Create Post", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Cancel Post"
-                        )
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Cancel Post")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -605,7 +721,6 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Image Picker Placeholder
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -638,7 +753,6 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
                 }
             }
 
-            // Status Selector (Lost / Found)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -647,9 +761,7 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
                     selected = status == "Lost",
                     onClick = { status = "Lost" },
                     label = { Text("Lost Item") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
-                    },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.errorContainer,
                         selectedLabelColor = MaterialTheme.colorScheme.onErrorContainer
@@ -659,9 +771,7 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
                     selected = status == "Found",
                     onClick = { status = "Found" },
                     label = { Text("Found Item") },
-                    leadingIcon = {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    },
+                    leadingIcon = { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
                         selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer
@@ -669,7 +779,6 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
                 )
             }
 
-            // Title Field
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
@@ -680,7 +789,6 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // Location Field
             OutlinedTextField(
                 value = location,
                 onValueChange = { location = it },
@@ -691,7 +799,6 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // Description Field
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
@@ -704,32 +811,144 @@ fun CreatePostScreen(onBackClick: () -> Unit, onPostCreated: (LostFoundPost) -> 
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Post Button
             Button(
                 onClick = {
-                    // Create the new post object
                     val newPost = LostFoundPost(
-                        id = System.currentTimeMillis().toInt(), // Generate a fake unique ID
-                        username = "You", // Assume current user
+                        id = System.currentTimeMillis().toInt(),
+                        username = "You",
                         timeAgo = "Just now",
                         status = status,
                         title = title,
                         description = description,
                         location = location
                     )
-                    onPostCreated(newPost) // Pass it back to the navigator
+                    onPostCreated(newPost)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                ),
-                enabled = title.isNotBlank() && location.isNotBlank() && description.isNotBlank() // Require fields
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                enabled = title.isNotBlank() && location.isNotBlank() && description.isNotBlank()
             ) {
                 Text(text = "Post", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProfileScreen(onMenuClick: () -> Unit, onBackClick: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Profile", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back to Home")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onMenuClick) {
+                        Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Profile Avatar
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .clip(CircleShape)
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.secondary
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = "Profile Image",
+                    tint = Color.White,
+                    modifier = Modifier.size(64.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "John Doe",
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.headlineSmall
+            )
+            Text(
+                text = "Computer Science • Student",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Stats Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                StatCard(title = "Posts", value = "12")
+                StatCard(title = "Found", value = "5")
+                StatCard(title = "Returned", value = "3")
+            }
+        }
+    }
+}
+
+@Composable
+fun StatCard(title: String, value: String) {
+    Card(
+        modifier = Modifier.size(width = 100.dp, height = 90.dp),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = value,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
