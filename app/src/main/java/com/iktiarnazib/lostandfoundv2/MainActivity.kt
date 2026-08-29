@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,6 +61,13 @@ data class MessagePreview(
     val unreadCount: Int = 0
 )
 
+// Data class for Individual Chat Messages
+data class ChatMessage(
+    val text: String,
+    val isSentByMe: Boolean,
+    val time: String
+)
+
 // Data class for User Profile (Manual)
 data class UserData(
     val name: String = "",
@@ -71,7 +79,7 @@ data class UserData(
 )
 
 // Navigation Routes
-enum class Screen { Login, SignUp, ForgotPassword, Home, Messages, CreatePost, Profile }
+enum class Screen { Login, SignUp, ForgotPassword, Home, Messages, Chat, CreatePost, Profile }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,6 +104,9 @@ fun AppNavigator() {
 
     // Global state for current logged-in user
     var currentUser by remember { mutableStateOf<UserData?>(null) }
+
+    // State to hold the selected conversation when navigating to Chat
+    var selectedMessage by remember { mutableStateOf<MessagePreview?>(null) }
 
     val posts = remember {
         mutableStateListOf(
@@ -128,7 +139,17 @@ fun AppNavigator() {
                 onAddPostClick = { currentScreen = Screen.CreatePost },
                 onMenuClick = { isDrawerOpen = true }
             )
-            Screen.Messages -> MessageScreen(onBackClick = { currentScreen = Screen.Home })
+            Screen.Messages -> MessageScreen(
+                onBackClick = { currentScreen = Screen.Home },
+                onMessageClick = { message ->
+                    selectedMessage = message
+                    currentScreen = Screen.Chat
+                }
+            )
+            Screen.Chat -> ChatScreen(
+                messagePreview = selectedMessage,
+                onBackClick = { currentScreen = Screen.Messages }
+            )
             Screen.CreatePost -> CreatePostScreen(
                 onBackClick = { currentScreen = Screen.Home },
                 onPostCreated = { newPost ->
@@ -205,7 +226,6 @@ fun RightDrawerUI(
         ) {
             // Drawer Header
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Replaced generic person icon with your logo
                 Image(
                     painter = painterResource(id = R.drawable.findoralogo),
                     contentDescription = "App Logo",
@@ -812,7 +832,7 @@ fun PostInteraction(icon: ImageVector, text: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MessageScreen(onBackClick: () -> Unit) {
+fun MessageScreen(onBackClick: () -> Unit, onMessageClick: (MessagePreview) -> Unit) {
     val messages = remember {
         listOf(
             MessagePreview(1, "Sarah Johnson", "Did you find the wallet near the cafeteria?", "10:30 AM", 2),
@@ -845,18 +865,20 @@ fun MessageScreen(onBackClick: () -> Unit) {
                 .background(MaterialTheme.colorScheme.background)
         ) {
             items(messages) { message ->
-                MessageItem(message)
+                MessageItem(message) {
+                    onMessageClick(message)
+                }
             }
         }
     }
 }
 
 @Composable
-fun MessageItem(message: MessagePreview) {
+fun MessageItem(message: MessagePreview, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { /* TODO: Open Chat Screen */ }
+            .clickable { onClick() }
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -933,6 +955,163 @@ fun MessageItem(message: MessagePreview) {
         thickness = 0.5.dp,
         color = MaterialTheme.colorScheme.surfaceVariant
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatScreen(messagePreview: MessagePreview?, onBackClick: () -> Unit) {
+    var messageText by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+
+    // Initialize with some dummy messages based on the preview
+    val messages = remember {
+        mutableStateListOf(
+            ChatMessage("Hi, regarding the item you posted.", false, "10:30 AM"),
+            ChatMessage("Yes, what's up?", true, "10:31 AM"),
+            ChatMessage(messagePreview?.previewText ?: "Is it still available?", false, "10:32 AM")
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = messagePreview?.username?.take(1) ?: "U",
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(messagePreview?.username ?: "Unknown User", fontWeight = FontWeight.Bold)
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBackClick) {
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back to Messages")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        },
+        bottomBar = {
+            Surface(
+                tonalElevation = 4.dp,
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = messageText,
+                        onValueChange = { messageText = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Message...") },
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent,
+                            cursorColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = {
+                            if (messageText.isNotBlank()) {
+                                messages.add(ChatMessage(messageText, true, "Now"))
+                                messageText = ""
+                            }
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Send,
+                            contentDescription = "Send Message",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+            }
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background),
+            state = listState,
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(messages) { msg ->
+                ChatBubble(message = msg)
+            }
+        }
+    }
+
+    // Scroll to bottom when a new message is added
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+}
+
+@Composable
+fun ChatBubble(message: ChatMessage) {
+    val alignment = if (message.isSentByMe) Alignment.End else Alignment.Start
+    val bubbleColor = if (message.isSentByMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+    val textColor = if (message.isSentByMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = alignment
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(
+                    RoundedCornerShape(
+                        topStart = 16.dp,
+                        topEnd = 16.dp,
+                        bottomStart = if (message.isSentByMe) 16.dp else 4.dp,
+                        bottomEnd = if (message.isSentByMe) 4.dp else 16.dp
+                    )
+                )
+                .background(bubbleColor)
+                .padding(12.dp)
+                .widthIn(max = 280.dp)
+        ) {
+            Text(
+                text = message.text,
+                color = textColor,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        Text(
+            text = message.time,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp)
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
