@@ -619,6 +619,28 @@ fun SignUpScreen(onSignUpComplete: (UserData) -> Unit, onBackClick: () -> Unit) 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(posts: List<LostFoundPost>, onMessageClick: () -> Unit, onAddPostClick: () -> Unit, onMenuClick: () -> Unit) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedTabIndex by remember { mutableStateOf(0) } // 0 for All, 1 for Lost, 2 for Found
+
+    val filteredPosts = remember(searchQuery, posts, selectedTabIndex) {
+        // Determine the status filter based on the selected tab
+        val statusFilter = when (selectedTabIndex) {
+            1 -> "Lost"
+            2 -> "Found"
+            else -> null // null means "All"
+        }
+
+        posts.filter { post ->
+            (statusFilter == null || post.status.equals(statusFilter, ignoreCase = true)) &&
+                    (searchQuery.isBlank() ||
+                            post.title.contains(searchQuery, ignoreCase = true) ||
+                            post.description.contains(searchQuery, ignoreCase = true) ||
+                            post.location.contains(searchQuery, ignoreCase = true) ||
+                            post.username.contains(searchQuery, ignoreCase = true) ||
+                            post.status.contains(searchQuery, ignoreCase = true))
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -665,16 +687,89 @@ fun HomeScreen(posts: List<LostFoundPost>, onMessageClick: () -> Unit, onAddPost
             }
         }
     ) { paddingValues ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background),
-            contentPadding = PaddingValues(vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .background(MaterialTheme.colorScheme.background)
         ) {
-            items(posts) { post ->
-                PostCard(post)
+            // Search Bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                placeholder = { Text("Search lost & found items...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear Search")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+
+            // Tabs for All, Lost, and Found
+            TabRow(
+                selectedTabIndex = selectedTabIndex,
+                modifier = Modifier.fillMaxWidth(),
+                containerColor = MaterialTheme.colorScheme.background,
+                contentColor = MaterialTheme.colorScheme.primary
+            ) {
+                Tab(
+                    selected = selectedTabIndex == 0,
+                    onClick = { selectedTabIndex = 0 },
+                    text = { Text("All", fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal) }
+                )
+                Tab(
+                    selected = selectedTabIndex == 1,
+                    onClick = { selectedTabIndex = 1 },
+                    text = { Text("Lost", fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal) }
+                )
+                Tab(
+                    selected = selectedTabIndex == 2,
+                    onClick = { selectedTabIndex = 2 },
+                    text = { Text("Found", fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal) }
+                )
+            }
+
+            // List of Posts
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (filteredPosts.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No items found matching '$searchQuery'",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    items(filteredPosts) { post ->
+                        PostCard(post)
+                    }
+                }
             }
         }
     }
