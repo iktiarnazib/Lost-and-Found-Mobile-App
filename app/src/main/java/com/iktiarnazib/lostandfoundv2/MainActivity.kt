@@ -11,16 +11,32 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -31,18 +47,54 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Comment
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Numbers
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TaskAlt
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -50,8 +102,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -80,7 +135,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 // ============================================================
-// 1. DATA MODELS & HELPERS
+// 1. DATA MODELS & HELPERS  (unchanged logic)
 // ============================================================
 
 data class UserData(
@@ -107,7 +162,6 @@ data class LostFoundPost(
     val authorSemester: String = "",
     val authorBatch: String = "",
     val claimedByName: String = "",
-    // Photo stored as a Base64 binary string inside the database (not Storage)
     val imageData: String = "",
     val likes: Map<String, Boolean> = emptyMap(),
     val commentCount: Long = 0,
@@ -146,12 +200,11 @@ data class ChatDestination(
 
 enum class Screen { Login, SignUp, ForgotPassword, Home, Messages, Chat, CreatePost, Comments, Profile }
 
-// Status colors: Lost = red, Found = blue, Given = green
 fun statusColor(status: String): Color = when (status.lowercase()) {
-    "lost" -> Color(0xFFD32F2F)
-    "found" -> Color(0xFF1976D2)
-    "given" -> Color(0xFF2E7D32)
-    else -> Color(0xFF757575)
+    "lost" -> Color(0xFFEF4444)
+    "found" -> Color(0xFF3B82F6)
+    "given" -> Color(0xFF22C55E)
+    else -> Color(0xFF8E8EA3)
 }
 
 fun Conversation.otherUserName(myUid: String): String =
@@ -180,10 +233,9 @@ fun Timestamp?.toChatTime(): String =
     this?.let { SimpleDateFormat("hh:mm a", Locale.getDefault()).format(it.toDate()) } ?: ""
 
 // ============================================================
-// 1b. IMAGE HELPERS (binary/Base64 in database, no Storage)
+// 1b. IMAGE HELPERS (unchanged logic)
 // ============================================================
 
-// Decode a Base64 binary string into a Bitmap (decoded once per image)
 @Composable
 fun rememberDecodedImage(base64: String?): Bitmap? {
     return remember(base64) {
@@ -200,13 +252,9 @@ sealed interface ImageEncodeResult {
     data class Failure(val message: String) : ImageEncodeResult
 }
 
-// Compress + downscale the picked photo, then encode as a Base64 binary
-// string that fits safely inside a Firestore document (1MB limit).
-// Reports specific errors instead of failing silently.
 suspend fun encodeImageToBase64(context: Context, uri: Uri): ImageEncodeResult =
     withContext(Dispatchers.IO) {
         try {
-            // 1) Read dimensions
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             val boundsOk = context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, bounds)
@@ -216,7 +264,6 @@ suspend fun encodeImageToBase64(context: Context, uri: Uri): ImageEncodeResult =
                 return@withContext ImageEncodeResult.Failure("Couldn't read the selected file. Try a different photo.")
             }
 
-            // 2) Downsample while decoding
             var sample = 1
             while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 900) sample *= 2
             val opts = BitmapFactory.Options().apply { inSampleSize = sample }
@@ -224,8 +271,6 @@ suspend fun encodeImageToBase64(context: Context, uri: Uri): ImageEncodeResult =
                 BitmapFactory.decodeStream(it, null, opts)
             }
 
-            // 3) Fallback: if decoding failed, keep the raw bytes as-is (if small
-            //    enough) — handles formats like HEIC/WEBP the device can still render
             if (bitmap == null) {
                 val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 return@withContext if (raw != null && raw.size <= 350_000) {
@@ -235,7 +280,6 @@ suspend fun encodeImageToBase64(context: Context, uri: Uri): ImageEncodeResult =
                 }
             }
 
-            // 4) Scale to max 900px longest side
             val scaled = if (bitmap.width > 900 || bitmap.height > 900) {
                 val scale = 900f / maxOf(bitmap.width, bitmap.height)
                 Bitmap.createScaledBitmap(
@@ -246,7 +290,6 @@ suspend fun encodeImageToBase64(context: Context, uri: Uri): ImageEncodeResult =
                 )
             } else bitmap
 
-            // 5) Compress, lowering quality until the binary is small enough
             var quality = 70
             var bytes: ByteArray
             do {
@@ -267,7 +310,265 @@ suspend fun encodeImageToBase64(context: Context, uri: Uri): ImageEncodeResult =
     }
 
 // ============================================================
-// 2. REPOSITORIES (Firebase logic)
+// 1c. FINDORA THEME + SHARED UI COMPONENTS
+// ============================================================
+
+private val BrandGradient = Brush.linearGradient(
+    listOf(Color(0xFF6A5AE0), Color(0xFF9B5CF7))
+)
+
+// Slowly shifting brand gradient — used on splash, login hero, profile, drawer
+@Composable
+fun animatedBrandGradient(vertical: Boolean = false): Brush {
+    val transition = rememberInfiniteTransition(label = "brandBg")
+    val shift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(5000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shift"
+    )
+    val c1 = lerp(Color(0xFF6A5AE0), Color(0xFF9B5CF7), shift)
+    val c2 = lerp(Color(0xFF9B5CF7), Color(0xFF6A5AE0), shift)
+    return if (vertical) Brush.verticalGradient(listOf(c1, c2))
+    else Brush.linearGradient(listOf(c1, c2))
+}
+
+private val FindoraLight = lightColorScheme(
+    primary = Color(0xFF5B5BD6),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFE5E3FF),
+    onPrimaryContainer = Color(0xFF1A1A6E),
+    secondary = Color(0xFF5B5B72),
+    secondaryContainer = Color(0xFFE2E1F2),
+    onSecondaryContainer = Color(0xFF191A2C),
+    tertiary = Color(0xFF1F9D55),
+    tertiaryContainer = Color(0xFFD3F5E2),
+    background = Color(0xFFF6F5FB),
+    onBackground = Color(0xFF1A1A24),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF1A1A24),
+    surfaceVariant = Color(0xFFE8E5F3),
+    onSurfaceVariant = Color(0xFF6B6880),
+    outline = Color(0xFFC9C5DC),
+    error = Color(0xFFE04B4B),
+    errorContainer = Color(0xFFFFE4E4)
+)
+
+private val FindoraDark = darkColorScheme(
+    primary = Color(0xFFBEBBFF),
+    onPrimary = Color(0xFF252578),
+    primaryContainer = Color(0xFF3C3CA8),
+    onPrimaryContainer = Color(0xFFE5E3FF),
+    secondary = Color(0xFFC4C3DD),
+    secondaryContainer = Color(0xFF34344C),
+    onSecondaryContainer = Color(0xFFE0E0F5),
+    tertiary = Color(0xFF6FE0A0),
+    tertiaryContainer = Color(0xFF14532D),
+    background = Color(0xFF0F0F19),
+    onBackground = Color(0xFFE5E4F0),
+    surface = Color(0xFF181826),
+    onSurface = Color(0xFFE5E4F0),
+    surfaceVariant = Color(0xFF26263A),
+    onSurfaceVariant = Color(0xFFC7C4D8),
+    outline = Color(0xFF47455F),
+    error = Color(0xFFFF7B7B),
+    errorContainer = Color(0xFF4A1D1D)
+)
+
+@Composable
+fun FindoraTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = if (isSystemInDarkTheme()) FindoraDark else FindoraLight,
+        content = content
+    )
+}
+
+// Gradient pill button
+@Composable
+fun GradientButton(
+    text: String,
+    enabled: Boolean = true,
+    isLoading: Boolean = false,
+    onClick: () -> Unit
+) {
+    val bg = if (enabled) BrandGradient
+    else Brush.linearGradient(
+        listOf(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.surfaceVariant
+        )
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(54.dp)
+            .shadow(if (enabled) 10.dp else 0.dp, RoundedCornerShape(18.dp), spotColor = Color(0xFF6A5AE0))
+            .clip(RoundedCornerShape(18.dp))
+            .background(bg)
+            .clickable(enabled = enabled && !isLoading) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.5.dp,
+                color = Color.White
+            )
+        } else {
+            Text(
+                text = text,
+                color = if (enabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+// Reusable gradient circle action button (chat send, comment send)
+@Composable
+fun GradientCircleButton(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    val bg = if (enabled) BrandGradient
+    else Brush.linearGradient(
+        listOf(
+            Color(0xFF6A5AE0).copy(alpha = 0.35f),
+            Color(0xFF9B5CF7).copy(alpha = 0.35f)
+        )
+    )
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .clip(CircleShape)
+            .background(bg)
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = Color.White, modifier = Modifier.size(20.dp))
+    }
+}
+
+// Gradient circle avatar with initial
+@Composable
+fun GradientAvatar(name: String, size: Dp, textStyle: androidx.compose.ui.text.TextStyle? = null) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Brush.linearGradient(listOf(Color(0xFF6A5AE0), Color(0xFFB15CF7)))),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = name.trim().take(1).uppercase().ifBlank { "?" },
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            style = textStyle ?: MaterialTheme.typography.titleMedium
+        )
+    }
+}
+
+// Colored status pill with icon
+@Composable
+fun StatusBadge(status: String, fontSize: Int = 11) {
+    val color = statusColor(status)
+    val icon = when (status.lowercase()) {
+        "lost" -> Icons.Default.SearchOff
+        "found" -> Icons.Default.CheckCircle
+        "given" -> Icons.Default.TaskAlt
+        else -> Icons.Default.AutoAwesome
+    }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(color.copy(alpha = 0.15f))
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = status,
+                color = color,
+                fontWeight = FontWeight.Bold,
+                fontSize = fontSize.sp
+            )
+        }
+    }
+}
+
+// Modern empty state
+@Composable
+fun EmptyState(icon: ImageVector, title: String, subtitle: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(96.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(44.dp))
+        }
+        Spacer(modifier = Modifier.height(18.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+// Error banner chip
+@Composable
+fun ErrorBanner(text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+// Pulsing "online" dot
+@Composable
+fun PulsingDot(color: Color) {
+    val transition = rememberInfiniteTransition(label = "dot")
+    val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+        label = "alpha"
+    )
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(color.copy(alpha = alpha))
+    )
+}
+
+// ============================================================
+// 2. REPOSITORIES (unchanged)
 // ============================================================
 
 class AuthRepository {
@@ -290,7 +591,6 @@ class AuthRepository {
         awaitClose { reg.remove() }
     }
 
-    // Self-healing: if the profile doc was never created, create a basic one
     suspend fun ensureProfile(user: FirebaseUser) {
         try {
             val ref = db.collection("users").document(user.uid)
@@ -361,13 +661,11 @@ class PostRepository {
         Result.success(Unit)
     } catch (e: Exception) { Result.failure(e) }
 
-    // Only the owner can delete (enforced by rules too)
     suspend fun deletePost(postId: String): Result<Unit> = try {
         db.collection("posts").document(postId).delete().await()
         Result.success(Unit)
     } catch (e: Exception) { Result.failure(e) }
 
-    // Owner marks their Lost post as Given + records who received it
     suspend fun markPostGiven(postId: String, claimedByName: String): Result<Unit> = try {
         db.collection("posts").document(postId).update(
             mapOf(
@@ -425,7 +723,6 @@ class PostRepository {
 class ChatRepository {
     private val db = FirebaseFirestore.getInstance()
 
-    // Deterministic chat ID so both users always share ONE conversation
     private fun chatIdFor(a: String, b: String) = if (a < b) "${a}_$b" else "${b}_$a"
 
     fun observeConversations(uid: String): Flow<Result<List<Conversation>>> = callbackFlow {
@@ -449,8 +746,6 @@ class ChatRepository {
     ): Result<String> = try {
         val chatId = chatIdFor(myUid, otherUid)
         val ref = db.collection("chats").document(chatId)
-        // merge-set: creates the chat if missing, refreshes participant names
-        // if it exists. No existence-check read needed, so rules stay airtight.
         ref.set(
             mapOf(
                 "participants" to listOf(myUid, otherUid),
@@ -461,7 +756,6 @@ class ChatRepository {
         Result.success(chatId)
     } catch (e: Exception) { Result.failure(e) }
 
-    // No server-side orderBy — sorted client-side
     fun observeMessages(chatId: String): Flow<Result<List<ChatMessage>>> = callbackFlow {
         val reg = db.collection("chats").document(chatId)
             .collection("messages")
@@ -504,7 +798,7 @@ class ChatRepository {
 }
 
 // ============================================================
-// 3. VIEWMODELS
+// 3. VIEWMODELS (unchanged)
 // ============================================================
 
 class AuthViewModel : ViewModel() {
@@ -637,8 +931,6 @@ class FeedViewModel : ViewModel() {
         }
     }
 
-    // Waits for the Firestore write to finish before reporting success,
-    // so the Create Post screen only navigates away when it truly saved
     fun createPost(
         status: String, title: String, description: String,
         location: String, imageData: String, author: UserData?,
@@ -670,7 +962,6 @@ class FeedViewModel : ViewModel() {
         }
     }
 
-    // Optimistic delete — disappears instantly; restored if Firestore refuses
     fun deletePost(post: LostFoundPost) {
         val original = _posts.value
         _posts.value = original.filterNot { it.id == post.id }
@@ -781,7 +1072,6 @@ class ChatViewModel : ViewModel() {
         if (currentChatId == chatId && !lastAttachFailed) return
         currentChatId = chatId
         otherUserId = otherUid
-        // Never let another conversation's history show here
         _messages.value = emptyList()
         _sendError.value = null
         _loadError.value = null
@@ -864,14 +1154,10 @@ class CommentsViewModel : ViewModel() {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    AppNavigator()
-                }
+            FindoraTheme {
+                AppNavigator()
             }
         }
     }
@@ -897,32 +1183,68 @@ fun AppNavigator() {
         isDrawerOpen = false
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (isCheckingAuth) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+            // ---- Branded animated splash ----
+            val pulse = rememberInfiniteTransition(label = "splashPulse")
+            val logoScale by pulse.animateFloat(
+                initialValue = 0.94f,
+                targetValue = 1.06f,
+                animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+                label = "logoScale"
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(animatedBrandGradient(vertical = true)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .size(110.dp)
+                            .scale(logoScale)
+                            .shadow(24.dp, CircleShape, spotColor = Color.Black.copy(alpha = 0.4f))
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .padding(6.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.findoralogo),
+                            contentDescription = "Findora",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(30.dp))
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Text("Findora", color = Color.White, fontWeight = FontWeight.Black, fontSize = 22.sp)
+                }
             }
         } else {
             val user = currentUser
             if (user == null) {
                 // ---------- AUTH SCREENS ----------
-                when (currentScreen) {
-                    Screen.SignUp -> SignUpScreen(
-                        authViewModel = authViewModel,
-                        onBackClick = { currentScreen = Screen.Login }
-                    )
-                    Screen.ForgotPassword -> ForgotPasswordScreen(
-                        authViewModel = authViewModel,
-                        onBackClick = { currentScreen = Screen.Login }
-                    )
-                    else -> LoginScreen(
-                        authViewModel = authViewModel,
-                        onSignUpClick = { currentScreen = Screen.SignUp },
-                        onForgotPasswordClick = { currentScreen = Screen.ForgotPassword }
-                    )
+                Crossfade(targetState = currentScreen, animationSpec = tween(250), label = "auth") { screen ->
+                    when (screen) {
+                        Screen.SignUp -> SignUpScreen(
+                            authViewModel = authViewModel,
+                            onBackClick = { currentScreen = Screen.Login }
+                        )
+                        Screen.ForgotPassword -> ForgotPasswordScreen(
+                            authViewModel = authViewModel,
+                            onBackClick = { currentScreen = Screen.Login }
+                        )
+                        else -> LoginScreen(
+                            authViewModel = authViewModel,
+                            onSignUpClick = { currentScreen = Screen.SignUp },
+                            onForgotPasswordClick = { currentScreen = Screen.ForgotPassword }
+                        )
+                    }
                 }
             } else {
-                // ---------- LOGGED-IN SCREENS ----------
+                // ---------- LOGGED-IN ----------
                 val feedViewModel: FeedViewModel = viewModel(key = "feed_${user.uid}")
                 val messagesViewModel: MessagesViewModel = viewModel(key = "messages_${user.uid}")
                 val chatViewModel: ChatViewModel = viewModel(key = "chat_${user.uid}")
@@ -935,84 +1257,106 @@ fun AppNavigator() {
                 val totalUnread = conversations.sumOf { it.unreadFor(user.uid) }
 
                 val myPosts = posts.filter { it.userId == user.uid }
+                val showBottomBar = currentScreen == Screen.Home ||
+                        currentScreen == Screen.Messages || currentScreen == Screen.Profile
 
-                when (currentScreen) {
-                    Screen.Messages -> MessageScreen(
-                        viewModel = messagesViewModel,
-                        onBackClick = { currentScreen = Screen.Home },
-                        onOpenChat = { conversation ->
-                            messagesViewModel.markChatRead(conversation.id)
-                            chatDestination = ChatDestination(
-                                chatId = conversation.id,
-                                otherUserId = conversation.otherUserId(user.uid),
-                                otherUserName = conversation.otherUserName(user.uid)
-                            )
-                            currentScreen = Screen.Chat
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        Crossfade(targetState = currentScreen, animationSpec = tween(260), label = "screens") { screen ->
+                            when (screen) {
+                                Screen.Messages -> MessageScreen(
+                                    viewModel = messagesViewModel,
+                                    onBackClick = { currentScreen = Screen.Home },
+                                    onOpenChat = { conversation ->
+                                        messagesViewModel.markChatRead(conversation.id)
+                                        chatDestination = ChatDestination(
+                                            chatId = conversation.id,
+                                            otherUserId = conversation.otherUserId(user.uid),
+                                            otherUserName = conversation.otherUserName(user.uid)
+                                        )
+                                        currentScreen = Screen.Chat
+                                    }
+                                )
+                                Screen.Chat -> ChatScreen(
+                                    destination = chatDestination,
+                                    viewModel = chatViewModel,
+                                    onBackClick = { currentScreen = Screen.Messages }
+                                )
+                                Screen.CreatePost -> CreatePostScreen(
+                                    viewModel = feedViewModel,
+                                    currentUser = user,
+                                    onBackClick = { currentScreen = Screen.Home },
+                                    onPostCreated = { currentScreen = Screen.Home }
+                                )
+                                Screen.Comments -> CommentsScreen(
+                                    post = selectedPost,
+                                    viewModel = commentsViewModel,
+                                    user = user,
+                                    onBackClick = { currentScreen = Screen.Home }
+                                )
+                                Screen.Profile -> ProfileScreen(
+                                    user = user,
+                                    myPosts = myPosts,
+                                    onMarkGiven = { post, claimName ->
+                                        feedViewModel.markPostGiven(post, claimName)
+                                    },
+                                    onDeletePost = { post -> feedViewModel.deletePost(post) },
+                                    onMenuClick = { isDrawerOpen = true },
+                                    onBackClick = { currentScreen = Screen.Home }
+                                )
+                                else -> HomeScreen(
+                                    posts = posts,
+                                    userName = user.name,
+                                    myUid = user.uid,
+                                    feedError = feedError,
+                                    isRefreshing = isRefreshing,
+                                    onRefresh = { feedViewModel.refresh() },
+                                    onUserMessageClick = { post ->
+                                        messagesViewModel.startChatWith(
+                                            otherUid = post.userId,
+                                            otherName = post.username,
+                                            myName = user.name,
+                                            onReady = { chatId, otherName ->
+                                                chatDestination = ChatDestination(chatId, post.userId, otherName)
+                                                currentScreen = Screen.Chat
+                                            },
+                                            onError = { msg ->
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            }
+                                        )
+                                    },
+                                    onLikeClick = { post -> feedViewModel.toggleLike(post, user.uid) },
+                                    onCommentClick = { post ->
+                                        selectedPost = post
+                                        currentScreen = Screen.Comments
+                                    },
+                                    onDeletePost = { post -> feedViewModel.deletePost(post) },
+                                    onAddPostClick = { currentScreen = Screen.CreatePost },
+                                    onMenuClick = { isDrawerOpen = true }
+                                )
+                            }
                         }
-                    )
-                    Screen.Chat -> ChatScreen(
-                        destination = chatDestination,
-                        viewModel = chatViewModel,
-                        onBackClick = { currentScreen = Screen.Messages }
-                    )
-                    Screen.CreatePost -> CreatePostScreen(
-                        viewModel = feedViewModel,
-                        currentUser = user,
-                        onBackClick = { currentScreen = Screen.Home },
-                        onPostCreated = { currentScreen = Screen.Home }
-                    )
-                    Screen.Comments -> CommentsScreen(
-                        post = selectedPost,
-                        viewModel = commentsViewModel,
-                        user = user,
-                        onBackClick = { currentScreen = Screen.Home }
-                    )
-                    Screen.Profile -> ProfileScreen(
-                        user = user,
-                        myPosts = myPosts,
-                        onMarkGiven = { post, claimName ->
-                            feedViewModel.markPostGiven(post, claimName)
-                        },
-                        onDeletePost = { post -> feedViewModel.deletePost(post) },
-                        onMenuClick = { isDrawerOpen = true },
-                        onBackClick = { currentScreen = Screen.Home }
-                    )
-                    else -> HomeScreen(
-                        posts = posts,
-                        myUid = user.uid,
-                        unreadCount = totalUnread,
-                        feedError = feedError,
-                        isRefreshing = isRefreshing,
-                        onRefresh = { feedViewModel.refresh() },
-                        onUserMessageClick = { post ->
-                            messagesViewModel.startChatWith(
-                                otherUid = post.userId,
-                                otherName = post.username,
-                                myName = user.name,
-                                onReady = { chatId, otherName ->
-                                    chatDestination = ChatDestination(chatId, post.userId, otherName)
-                                    currentScreen = Screen.Chat
-                                },
-                                onError = { msg ->
-                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                }
-                            )
-                        },
-                        onLikeClick = { post -> feedViewModel.toggleLike(post, user.uid) },
-                        onCommentClick = { post ->
-                            selectedPost = post
-                            currentScreen = Screen.Comments
-                        },
-                        onDeletePost = { post -> feedViewModel.deletePost(post) },
-                        onMessageClick = { currentScreen = Screen.Messages },
-                        onAddPostClick = { currentScreen = Screen.CreatePost },
-                        onMenuClick = { isDrawerOpen = true }
-                    )
+                    }
+
+                    // ---- Floating pill bottom navigation ----
+                    AnimatedVisibility(
+                        visible = showBottomBar,
+                        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                    ) {
+                        FindoraBottomBar(
+                            current = currentScreen,
+                            unreadCount = totalUnread,
+                            onHome = { currentScreen = Screen.Home },
+                            onMessages = { currentScreen = Screen.Messages },
+                            onProfile = { currentScreen = Screen.Profile }
+                        )
+                    }
                 }
             }
         }
 
-        // ---------- Right-Side Drawer Scrim ----------
+        // ---------- Drawer scrim ----------
         AnimatedVisibility(
             visible = isDrawerOpen,
             enter = fadeIn(),
@@ -1022,12 +1366,12 @@ fun AppNavigator() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.6f))
+                    .background(Color.Black.copy(alpha = 0.55f))
                     .clickable { isDrawerOpen = false }
             )
         }
 
-        // ---------- Right-Side Drawer UI ----------
+        // ---------- Drawer ----------
         AnimatedVisibility(
             visible = isDrawerOpen,
             enter = slideInHorizontally(initialOffsetX = { it }),
@@ -1044,8 +1388,93 @@ fun AppNavigator() {
     }
 }
 
+// Floating pill bottom bar with animated selection
+@Composable
+fun FindoraBottomBar(
+    current: Screen,
+    unreadCount: Int,
+    onHome: () -> Unit,
+    onMessages: () -> Unit,
+    onProfile: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        shape = RoundedCornerShape(26.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 14.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BottomNavItem(Icons.Default.Home, "Home", current == Screen.Home, onClick = onHome)
+            BottomNavItem(Icons.Default.Email, "Chats", current == Screen.Messages, badge = unreadCount, onClick = onMessages)
+            BottomNavItem(Icons.Default.Person, "Profile", current == Screen.Profile, onClick = onProfile)
+        }
+    }
+}
+
+@Composable
+fun BottomNavItem(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    badge: Int = 0,
+    onClick: () -> Unit
+) {
+    val tint by animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(250),
+        label = "navTint"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.15f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "navScale"
+    )
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+    ) {
+        Box {
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(25.dp).scale(scale))
+            if (badge > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 7.dp, y = (-3).dp)
+                        .size(18.dp)
+                        .clip(CircleShape)
+                        .background(statusColor("Lost")),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        badge.toString(),
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+        Text(
+            label,
+            color = tint,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+        )
+    }
+}
+
 // ============================================================
-// 5. DRAWER
+// 5. DRAWER (animated gradient header)
 // ============================================================
 
 @Composable
@@ -1058,76 +1487,107 @@ fun RightDrawerUI(
     Surface(
         modifier = Modifier
             .fillMaxHeight()
-            .width(300.dp),
+            .width(310.dp),
         color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp)
+        shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp)
     ) {
-        Column(modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(
-                    painter = painterResource(id = R.drawable.findoralogo),
-                    contentDescription = "App Logo",
-                    contentScale = ContentScale.Crop,
+        Column(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(animatedBrandGradient(vertical = true))
+            ) {
+                Row(
                     modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(
-                        text = user?.name ?: "Guest User",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        text = user?.email ?: "Not logged in",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                        .statusBarsPadding()
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.25f))
+                            .padding(5.dp)
+                    ) {
+                        GradientAvatar(user?.name ?: "G", 46.dp, MaterialTheme.typography.titleMedium)
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            text = user?.name ?: "Guest User",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = user?.email ?: "Not logged in",
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             DrawerItem(icon = Icons.Default.Home, text = "Home", onClick = onHomeClick)
             DrawerItem(icon = Icons.Default.Person, text = "Profile", onClick = onProfileClick)
 
             Spacer(modifier = Modifier.weight(1f))
 
-            DrawerItem(icon = Icons.Default.Logout, text = "Logout", onClick = onLogoutClick)
+            DrawerItem(
+                icon = Icons.Default.Logout,
+                text = "Logout",
+                tint = MaterialTheme.colorScheme.error,
+                containerTint = MaterialTheme.colorScheme.error.copy(alpha = 0.10f),
+                onClick = onLogoutClick
+            )
+            Text(
+                "Findora • v2.0",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            )
+            Spacer(modifier = Modifier.navigationBarsPadding())
         }
     }
 }
 
 @Composable
-fun DrawerItem(icon: ImageVector, text: String, onClick: () -> Unit) {
+fun DrawerItem(
+    icon: ImageVector,
+    text: String,
+    tint: Color = MaterialTheme.colorScheme.primary,
+    containerTint: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+    onClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 5.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
-            .padding(16.dp),
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = text,
-            tint = MaterialTheme.colorScheme.primary
-        )
-        Spacer(modifier = Modifier.width(16.dp))
-        Text(
-            text = text,
-            fontWeight = FontWeight.Medium,
-            style = MaterialTheme.typography.bodyLarge
-        )
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(containerTint),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = text, tint = tint, modifier = Modifier.size(20.dp))
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Text(text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
 // ============================================================
-// 6. LOGIN SCREEN
+// 6. LOGIN SCREEN (animated hero + sheet form)
 // ============================================================
 
 @Composable
@@ -1141,118 +1601,151 @@ fun LoginScreen(authViewModel: AuthViewModel, onSignUpClick: () -> Unit, onForgo
 
     LaunchedEffect(Unit) { authViewModel.clearMessages() }
 
+    val pulse = rememberInfiniteTransition(label = "loginPulse")
+    val logoScale by pulse.animateFloat(
+        initialValue = 0.97f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Reverse),
+        label = "logoScale"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.findoralogo),
-            contentDescription = "App Logo",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier
-                .size(120.dp)
-                .clip(CircleShape)
-        )
-
-        Text(
-            text = "Findora",
-            style = MaterialTheme.typography.displaySmall.copy(
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            ),
-            modifier = Modifier.padding(top = 16.dp)
-        )
-
-        Text(
-            text = "Welcome back! Please login.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp, bottom = 32.dp)
-        )
-
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Email") },
-            leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            singleLine = true,
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("Password") },
-            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-            trailingIcon = {
-                val image = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
-                IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                    Icon(imageVector = image, contentDescription = if (passwordVisible) "Hide password" else "Show password")
-                }
-            },
-            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            singleLine = true,
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
-        )
-
+        // Animated gradient hero
         Box(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            TextButton(onClick = onForgotPasswordClick) {
-                Text("Forgot Password?", color = MaterialTheme.colorScheme.secondary)
-            }
-        }
-
-        error?.let {
-            Text(
-                text = it,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = { authViewModel.login(email, password) },
-            enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            )
+                .background(animatedBrandGradient(vertical = true))
         ) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
+            Column(
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .fillMaxWidth()
+                    .padding(vertical = 40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(104.dp)
+                        .scale(logoScale)
+                        .shadow(20.dp, CircleShape, spotColor = Color.Black.copy(alpha = 0.35f))
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .padding(5.dp)
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.findoralogo),
+                        contentDescription = "Findora Logo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Findora",
+                    style = MaterialTheme.typography.displaySmall,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
                 )
-            } else {
-                Text(text = "Login", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Lost something? Found something? Start here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.85f)
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        // Form sheet
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "Welcome back 👋",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                "Login to continue",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 28.dp)
+            )
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Don't have an account?", style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onSignUpClick) {
-                Text("Sign Up", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it },
+                label = { Text("Email") },
+                leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                singleLine = true,
+                shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Password") },
+                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                trailingIcon = {
+                    val image = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(imageVector = image, contentDescription = if (passwordVisible) "Hide password" else "Show password")
+                    }
+                },
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                singleLine = true,
+                shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                TextButton(onClick = onForgotPasswordClick) {
+                    Text("Forgot Password?", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            error?.let {
+                ErrorBanner(it)
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            GradientButton(
+                text = "Login",
+                enabled = email.isNotBlank() && password.isNotBlank(),
+                isLoading = isLoading
+            ) { authViewModel.login(email, password) }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Don't have an account?", style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = onSignUpClick) {
+                    Text("Sign Up", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                }
             }
         }
     }
@@ -1281,6 +1774,7 @@ fun ForgotPasswordScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) 
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("Forgot Password", fontWeight = FontWeight.Bold) },
@@ -1290,7 +1784,7 @@ fun ForgotPasswordScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) 
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.primary
                 )
             )
@@ -1300,32 +1794,35 @@ fun ForgotPasswordScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) 
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(36.dp))
 
-            Image(
-                painter = painterResource(id = R.drawable.findoralogo),
-                contentDescription = "App Logo",
-                contentScale = ContentScale.Crop,
+            Box(
                 modifier = Modifier
-                    .size(100.dp)
+                    .size(110.dp)
+                    .shadow(16.dp, CircleShape, spotColor = Color(0xFF6A5AE0))
                     .clip(CircleShape)
-            )
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(44.dp)
+                )
+            }
 
             Text(
-                text = "Reset Password",
-                style = MaterialTheme.typography.headlineMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                ),
+                "Reset Password",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(top = 24.dp, bottom = 8.dp)
             )
-
             Text(
-                text = "Enter your email address below and we'll send you a link to reset your password.",
+                "Enter your email and we'll send you a link to reset your password.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -1339,42 +1836,26 @@ fun ForgotPasswordScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) 
                 leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
 
             error?.let {
-                Text(
-                    text = it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
+                ErrorBanner(it)
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Button(
-                onClick = { authViewModel.sendPasswordReset(email) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                ),
-                enabled = email.isNotBlank() && !isLoading
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                } else {
-                    Text(text = "Send Reset Email", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                }
-            }
+            GradientButton(
+                text = "Send Reset Email",
+                enabled = email.isNotBlank(),
+                isLoading = isLoading
+            ) { authViewModel.sendPasswordReset(email) }
         }
     }
 }
@@ -1404,6 +1885,7 @@ fun SignUpScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) {
             password.isNotBlank() && password == confirmPassword
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = { Text("Create Account", fontWeight = FontWeight.Bold) },
@@ -1413,7 +1895,7 @@ fun SignUpScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.primary
                 )
             )
@@ -1423,47 +1905,76 @@ fun SignUpScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 24.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             OutlinedTextField(
                 value = name, onValueChange = { name = it },
                 label = { Text("Full Name") },
                 leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
-                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                singleLine = true, shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = id, onValueChange = { id = it },
                 label = { Text("Student ID") },
                 leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null) },
-                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                singleLine = true, shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = roll, onValueChange = { roll = it },
                 label = { Text("Roll Number") },
                 leadingIcon = { Icon(Icons.Default.Numbers, contentDescription = null) },
-                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                singleLine = true, shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = semester, onValueChange = { semester = it },
                 label = { Text("Semester") },
                 leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) },
-                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                singleLine = true, shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = batch, onValueChange = { batch = it },
                 label = { Text("Batch") },
                 leadingIcon = { Icon(Icons.Default.School, contentDescription = null) },
-                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                singleLine = true, shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = email, onValueChange = { email = it },
                 label = { Text("Email") },
                 leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                singleLine = true, shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = password, onValueChange = { password = it },
@@ -1477,7 +1988,12 @@ fun SignUpScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) {
                 },
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                singleLine = true, shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = confirmPassword, onValueChange = { confirmPassword = it },
@@ -1485,65 +2001,52 @@ fun SignUpScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) {
                 leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(),
-                isError = confirmPassword.isNotBlank() && password != confirmPassword
+                singleLine = true, shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
+                isError = confirmPassword.isNotBlank() && password != confirmPassword,
+                modifier = Modifier.fillMaxWidth()
             )
 
-            error?.let {
-                Text(
-                    text = it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
+            error?.let { ErrorBanner(it) }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Button(
-                onClick = {
-                    authViewModel.signUp(
-                        UserData(
-                            name = name.trim(),
-                            studentId = id.trim(),
-                            roll = roll.trim(),
-                            semester = semester.trim(),
-                            batch = batch.trim(),
-                            email = email.trim()
-                        ),
-                        password
-                    )
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                enabled = isFormValid && !isLoading
+            GradientButton(
+                text = "Create Account",
+                enabled = isFormValid,
+                isLoading = isLoading
             ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                } else {
-                    Text(text = "Sign Up", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                }
+                authViewModel.signUp(
+                    UserData(
+                        name = name.trim(),
+                        studentId = id.trim(),
+                        roll = roll.trim(),
+                        semester = semester.trim(),
+                        batch = batch.trim(),
+                        email = email.trim()
+                    ),
+                    password
+                )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
 
 // ============================================================
-// 9. HOME FEED SCREEN (tabs: All | Lost | Given)
+// 9. HOME FEED (hero header, filter chips, modern cards)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     posts: List<LostFoundPost>,
+    userName: String,
     myUid: String,
-    unreadCount: Int,
     feedError: String?,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
@@ -1551,21 +2054,19 @@ fun HomeScreen(
     onLikeClick: (LostFoundPost) -> Unit,
     onCommentClick: (LostFoundPost) -> Unit,
     onDeletePost: (LostFoundPost) -> Unit,
-    onMessageClick: () -> Unit,
     onAddPostClick: () -> Unit,
     onMenuClick: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var selectedTabIndex by remember { mutableStateOf(0) } // 0 = All, 1 = Lost, 2 = Given
+    var selectedFilter by remember { mutableStateOf("All") } // All, Lost, Found, Given
 
-    val filteredPosts = remember(searchQuery, posts, selectedTabIndex) {
-        val statusFilter = when (selectedTabIndex) {
-            1 -> "Lost"
-            2 -> "Given"
-            else -> null
-        }
+    val lostCount = posts.count { it.status.equals("Lost", true) }
+    val foundCount = posts.count { it.status.equals("Found", true) }
+    val givenCount = posts.count { it.status.equals("Given", true) }
+
+    val filteredPosts = remember(searchQuery, posts, selectedFilter) {
         posts.filter { post ->
-            (statusFilter == null || post.status.equals(statusFilter, ignoreCase = true)) &&
+            (selectedFilter == "All" || post.status.equals(selectedFilter, ignoreCase = true)) &&
                     (searchQuery.isBlank() ||
                             post.title.contains(searchQuery, ignoreCase = true) ||
                             post.description.contains(searchQuery, ignoreCase = true) ||
@@ -1576,57 +2077,61 @@ fun HomeScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painter = painterResource(id = R.drawable.findoralogo),
-                            contentDescription = "App Logo",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Findora Feed", fontWeight = FontWeight.Bold)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onRefresh, enabled = !isRefreshing) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh")
-                        }
-                    }
-                    IconButton(onClick = onMessageClick) {
-                        BadgedBox(badge = {
-                            if (unreadCount > 0) Badge { Text(unreadCount.toString()) }
-                        }) {
-                            Icon(imageVector = Icons.Default.Email, contentDescription = "Messages")
-                        }
-                    }
-                    IconButton(onClick = onMenuClick) {
-                        Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.primary
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.findoralogo),
+                    contentDescription = "App Logo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .shadow(6.dp, CircleShape, spotColor = Color(0xFF6A5AE0))
+                        .clip(CircleShape)
                 )
-            )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Findora",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "Hi, ${userName.split(" ").firstOrNull() ?: "there"} 👋",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onRefresh, enabled = !isRefreshing) {
+                    if (isRefreshing) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                    }
+                }
+                IconButton(onClick = onMenuClick) {
+                    Icon(Icons.Default.Menu, contentDescription = "Menu")
+                }
+            }
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = onAddPostClick,
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary
+            Box(
+                modifier = Modifier
+                    .size(58.dp)
+                    .shadow(10.dp, CircleShape, spotColor = Color(0xFF6A5AE0))
+                    .clip(CircleShape)
+                    .background(BrandGradient)
+                    .clickable(onClick = onAddPostClick),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Post")
+                Icon(Icons.Default.Add, contentDescription = "Add Post", tint = Color.White, modifier = Modifier.size(28.dp))
             }
         }
     ) { paddingValues ->
@@ -1634,14 +2139,13 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
         ) {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp),
                 placeholder = { Text("Search lost & found items...") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
@@ -1652,86 +2156,95 @@ fun HomeScreen(
                     }
                 },
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    unfocusedBorderColor = Color.Transparent,
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface
                 )
             )
 
-            TabRow(
-                selectedTabIndex = selectedTabIndex,
-                modifier = Modifier.fillMaxWidth(),
-                containerColor = MaterialTheme.colorScheme.background,
-                contentColor = MaterialTheme.colorScheme.primary
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Tab(
-                    selected = selectedTabIndex == 0,
-                    onClick = { selectedTabIndex = 0 },
-                    text = { Text("All", fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal) }
-                )
-                Tab(
-                    selected = selectedTabIndex == 1,
-                    onClick = { selectedTabIndex = 1 },
-                    text = { Text("Lost", fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal) }
-                )
-                Tab(
-                    selected = selectedTabIndex == 2,
-                    onClick = { selectedTabIndex = 2 },
-                    text = { Text("Given", fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal) }
-                )
+                FilterPill("All", Icons.Default.Apps, MaterialTheme.colorScheme.primary, posts.size, selectedFilter) { selectedFilter = "All" }
+                FilterPill("Lost", Icons.Default.SearchOff, statusColor("Lost"), lostCount, selectedFilter) { selectedFilter = "Lost" }
+                FilterPill("Found", Icons.Default.CheckCircle, statusColor("Found"), foundCount, selectedFilter) { selectedFilter = "Found" }
+                FilterPill("Given", Icons.Default.TaskAlt, statusColor("Given"), givenCount, selectedFilter) { selectedFilter = "Given" }
             }
 
-            feedError?.let {
-                Text(
-                    text = it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-            }
+            feedError?.let { ErrorBanner(it) }
 
-            Box(modifier = Modifier.fillMaxSize()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (filteredPosts.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = if (searchQuery.isBlank()) "No posts here yet.\nTap + to create one!"
-                                    else "No items found matching '$searchQuery'",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    } else {
-                        items(filteredPosts, key = { it.id }) { post ->
-                            PostCard(
-                                post = post,
-                                myUid = myUid,
-                                onMessageUser = onUserMessageClick,
-                                onLikeClick = onLikeClick,
-                                onCommentClick = onCommentClick,
-                                onDeletePost = onDeletePost
-                            )
-                        }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                if (filteredPosts.isEmpty()) {
+                    item {
+                        EmptyState(
+                            icon = if (searchQuery.isBlank()) Icons.Default.AutoAwesome else Icons.Default.Search,
+                            title = if (searchQuery.isBlank()) "Nothing here yet" else "No results",
+                            subtitle = if (searchQuery.isBlank())
+                                "Be the first to post a lost or found item. Tap the + button!"
+                            else "Try a different keyword or switch the filter."
+                        )
+                    }
+                } else {
+                    items(filteredPosts, key = { it.id }) { post ->
+                        PostCard(
+                            post = post,
+                            myUid = myUid,
+                            onMessageUser = onUserMessageClick,
+                            onLikeClick = onLikeClick,
+                            onCommentClick = onCommentClick,
+                            onDeletePost = onDeletePost
+                        )
                     }
                 }
             }
         }
     }
+}
+
+// FIXED for all M3 versions: no leadingIconColor / custom border block
+@Composable
+fun FilterPill(
+    label: String,
+    icon: ImageVector,
+    color: Color,
+    count: Int,
+    selected: String,
+    onSelect: () -> Unit
+) {
+    val isSelected = selected == label
+    FilterChip(
+        selected = isSelected,
+        onClick = onSelect,
+        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp)) },
+        label = {
+            Text(
+                "$label ($count)",
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+            )
+        },
+        shape = RoundedCornerShape(14.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            iconColor = color,
+            selectedContainerColor = color,
+            selectedLabelColor = Color.White,
+            selectedLeadingIconColor = Color.White
+        )
+    )
 }
 
 // ============================================================
@@ -1757,19 +2270,20 @@ fun AuthorInfoChip(text: String) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f))
-            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
 // ============================================================
-// 11. POST CARD (photo, owner delete, colored status)
+// 11. POST CARD (photo viewer, location pill, floating badge)
 // ============================================================
 
 @Composable
@@ -1782,10 +2296,17 @@ fun PostCard(
     onDeletePost: (LostFoundPost) -> Unit
 ) {
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val likedByMe = post.likes[myUid] == true
     val likeCount = post.likes.size
     val commentCount = post.commentCount.toInt()
     val isMyPost = post.userId == myUid
+
+    val likeScale by animateFloatAsState(
+        targetValue = if (likedByMe) 1.2f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "likeScale"
+    )
 
     var showDeleteDialog by remember { mutableStateOf(false) }
     if (showDeleteDialog) {
@@ -1795,10 +2316,7 @@ fun PostCard(
             text = { Text("Delete \"${post.title}\" permanently? This cannot be undone.") },
             confirmButton = {
                 TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        onDeletePost(post)
-                    }
+                    onClick = { showDeleteDialog = false; onDeletePost(post) }
                 ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
@@ -1807,197 +2325,303 @@ fun PostCard(
         )
     }
 
+    // Full-screen photo viewer
+    val decodedForViewer = rememberDecodedImage(post.imageData)
+    var showImageViewer by remember { mutableStateOf(false) }
+    if (showImageViewer && decodedForViewer != null) {
+        Dialog(
+            onDismissRequest = { showImageViewer = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.94f))
+                    .clickable { showImageViewer = false },
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    bitmap = decodedForViewer.asImageBitmap(),
+                    contentDescription = "Item Photo",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().padding(16.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(16.dp)
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.15f))
+                        .clickable { showImageViewer = false },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(20.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(24.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.secondaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = post.username.take(1),
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
+        Column(modifier = Modifier.padding(14.dp)) {
+            // ---- Author row ----
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                GradientAvatar(post.username, 42.dp)
                 Spacer(modifier = Modifier.width(12.dp))
-
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = post.username,
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(modifier = Modifier.height(3.dp))
-
-                    val author = rememberAuthorProfile(post.userId)
-                    val sem = author?.semester?.takeIf { it.isNotBlank() } ?: post.authorSemester
-                    val batch = author?.batch?.takeIf { it.isNotBlank() } ?: post.authorBatch
-                    val roll = author?.roll?.takeIf { it.isNotBlank() } ?: post.authorRoll
-                    val studentId = author?.studentId?.takeIf { it.isNotBlank() } ?: post.authorStudentId
-
-                    if (sem.isNotBlank() || batch.isNotBlank() || roll.isNotBlank() || studentId.isNotBlank()) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.horizontalScroll(rememberScrollState())
-                        ) {
-                            if (sem.isNotBlank()) AuthorInfoChip("Sem $sem")
-                            if (batch.isNotBlank()) AuthorInfoChip("Batch $batch")
-                            if (roll.isNotBlank()) AuthorInfoChip("Roll $roll")
-                            if (studentId.isNotBlank()) AuthorInfoChip("ID $studentId")
-                        }
-                        Spacer(modifier = Modifier.height(3.dp))
-                    }
-
                     Text(
-                        text = "${post.createdAt.timeAgo()} • ${post.location}",
+                        text = "${post.createdAt.timeAgo()}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
-                // Delete button — visible ONLY to the post's owner
                 if (isMyPost) {
-                    IconButton(onClick = { showDeleteDialog = true }, modifier = Modifier.size(36.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.10f))
+                            .clickable { showDeleteDialog = true },
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Delete,
+                            Icons.Default.Delete,
                             contentDescription = "Delete Post",
                             tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.width(6.dp))
                 }
-
-                IconButton(onClick = { onMessageUser(post) }, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Send,
-                        contentDescription = "Message ${post.username}",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                // Status badge — red for Lost, blue for Found, green for Given
-                val badgeColor = statusColor(post.status)
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(badgeColor.copy(alpha = 0.12f))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = post.status,
-                        color = badgeColor,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            // Item photo: decoded from the binary stored in the database,
-            // with a gradient placeholder when no photo was added
-            val decodedBitmap = rememberDecodedImage(post.imageData)
-            if (decodedBitmap != null) {
-                Image(
-                    bitmap = decodedBitmap.asImageBitmap(),
-                    contentDescription = "Item Photo",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .background(
-                            brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primaryContainer,
-                                    MaterialTheme.colorScheme.secondaryContainer
-                                )
-                            )
-                        ),
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                        .clickable { onMessageUser(post) },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Image,
-                        contentDescription = "No Photo",
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
+                        Icons.Default.Send,
+                        contentDescription = "Message ${post.username}",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
 
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = post.title,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleLarge
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = post.description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // ---- Info chips ----
+            val author = rememberAuthorProfile(post.userId)
+            val sem = author?.semester?.takeIf { it.isNotBlank() } ?: post.authorSemester
+            val batch = author?.batch?.takeIf { it.isNotBlank() } ?: post.authorBatch
+            val roll = author?.roll?.takeIf { it.isNotBlank() } ?: post.authorRoll
+            val studentId = author?.studentId?.takeIf { it.isNotBlank() } ?: post.authorStudentId
+
+            if (sem.isNotBlank() || batch.isNotBlank() || roll.isNotBlank() || studentId.isNotBlank()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    if (sem.isNotBlank()) AuthorInfoChip("Sem $sem")
+                    if (batch.isNotBlank()) AuthorInfoChip("Batch $batch")
+                    if (roll.isNotBlank()) AuthorInfoChip("Roll $roll")
+                    if (studentId.isNotBlank()) AuthorInfoChip("ID $studentId")
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+
+            // ---- Photo with overlays ----
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(190.dp)
+                    .clip(RoundedCornerShape(20.dp))
+            ) {
+                val decodedBitmap = rememberDecodedImage(post.imageData)
+                if (decodedBitmap != null) {
+                    Image(
+                        bitmap = decodedBitmap.asImageBitmap(),
+                        contentDescription = "Item Photo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { showImageViewer = true }
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        Color(0xFF6A5AE0).copy(alpha = 0.18f),
+                                        Color(0xFF9B5CF7).copy(alpha = 0.18f)
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Image,
+                            contentDescription = "No Photo",
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        )
+                    }
+                }
+
+                // Bottom scrim for the location pill
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f))
+                            )
+                        )
                 )
 
-                if (post.status.equals("Given", ignoreCase = true) && post.claimedByName.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = statusColor("Given"),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                // Floating status badge (top-right)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .shadow(4.dp, RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(statusColor(post.status))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val badgeIcon = when (post.status.lowercase()) {
+                            "lost" -> Icons.Default.SearchOff
+                            "found" -> Icons.Default.CheckCircle
+                            "given" -> Icons.Default.TaskAlt
+                            else -> Icons.Default.AutoAwesome
+                        }
+                        Icon(badgeIcon, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Given to ${post.claimedByName}",
-                            style = MaterialTheme.typography.bodySmall,
+                            post.status,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                // Location pill (bottom-left, on the scrim)
+                if (post.location.isNotBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(10.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            post.location,
+                            color = Color.White,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
-                            color = statusColor("Given")
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ---- Title + description ----
+            Text(
+                text = post.title,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = post.description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // ---- Given banner ----
+            if (post.status.equals("Given", ignoreCase = true) && post.claimedByName.isNotBlank()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(statusColor("Given").copy(alpha = 0.12f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.TaskAlt,
+                        contentDescription = null,
+                        tint = statusColor("Given"),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Given to ${post.claimedByName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = statusColor("Given")
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ---- Actions ----
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceAround
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 PostInteraction(
                     icon = if (likedByMe) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    text = if (likeCount > 0) "Like • $likeCount" else "Like",
+                    text = if (likeCount > 0) "$likeCount" else "Like",
                     tint = if (likedByMe) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    onClick = { onLikeClick(post) }
+                    iconScale = likeScale,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLikeClick(post)
+                    }
                 )
                 PostInteraction(
                     icon = Icons.Default.Comment,
-                    text = if (commentCount > 0) "Comment • $commentCount" else "Comment",
+                    text = if (commentCount > 0) "$commentCount" else "Comment",
                     onClick = { onCommentClick(post) }
                 )
                 PostInteraction(
@@ -2030,32 +2654,36 @@ fun PostInteraction(
     icon: ImageVector,
     text: String,
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    iconScale: Float = 1f,
     onClick: () -> Unit
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
-            .padding(8.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = text,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier
+                .size(21.dp)
+                .scale(iconScale),
             tint = tint
         )
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(6.dp))
         Text(
             text = text,
             style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
             color = tint
         )
     }
 }
 
 // ============================================================
-// 12. MESSAGES SCREEN
+// 12. MESSAGES SCREEN (cards with unread highlight)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2072,16 +2700,12 @@ fun MessageScreen(
     LaunchedEffect(Unit) { viewModel.retryIfNeeded() }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Messages", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back to Home")
-                    }
-                },
+                title = { Text("Messages", fontWeight = FontWeight.Black) },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.primary
                 )
             )
@@ -2091,30 +2715,26 @@ fun MessageScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
         ) {
             error?.let {
-                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                    Text(
-                        text = it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    TextButton(onClick = { viewModel.retry() }) {
-                        Text("Retry")
-                    }
-                }
+                ErrorBanner(it)
+                TextButton(
+                    onClick = { viewModel.retry() },
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) { Text("Retry") }
             }
             if (conversations.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No conversations yet.\nTap the send icon on a post to message its owner!",
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                EmptyState(
+                    icon = Icons.Default.Chat,
+                    title = "No conversations yet",
+                    subtitle = "Tap the send icon on a post to start a private chat with its owner!"
+                )
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     items(conversations, key = { it.id }) { conversation ->
                         ConversationItem(conversation, myUid) { onOpenChat(conversation) }
                     }
@@ -2129,90 +2749,78 @@ fun ConversationItem(conversation: Conversation, myUid: String, onClick: () -> U
     val otherName = conversation.otherUserName(myUid)
     val unread = conversation.unreadFor(myUid)
 
-    Row(
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = if (unread > 0) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else null,
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = otherName.take(1),
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleMedium
-            )
-        }
-
-        Spacer(modifier = Modifier.width(16.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = otherName,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Text(
-                    text = conversation.lastMessageTime.timeAgo(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = conversation.lastMessage.ifBlank { "Say hello!" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-
-                if (unread > 0) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = unread.toString(),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold
-                        )
+            GradientAvatar(otherName, 50.dp)
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = otherName,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = conversation.lastMessageTime.timeAgo(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.height(3.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = conversation.lastMessage.ifBlank { "Say hello! 👋" },
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (unread > 0) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (unread > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (unread > 0) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(BrandGradient),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = unread.toString(),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
         }
     }
-
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 80.dp, end = 16.dp),
-        thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.surfaceVariant
-    )
 }
 
 // ============================================================
-// 13. CHAT SCREEN
+// 13. CHAT SCREEN (gradient bubbles, pulsing presence)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2245,26 +2853,25 @@ fun ChatScreen(destination: ChatDestination?, viewModel: ChatViewModel, onBackCl
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = destination?.otherUserName?.take(1) ?: "U",
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
+                        GradientAvatar(destination?.otherUserName ?: "U", 36.dp, MaterialTheme.typography.bodyMedium)
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text(destination?.otherUserName ?: "Chat", fontWeight = FontWeight.Bold)
+                        Column {
+                            Text(destination?.otherUserName ?: "Chat", fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                PulsingDot(statusColor("Given"))
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    "Active now",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = statusColor("Given")
+                                )
+                            }
+                        }
                     }
                 },
                 navigationIcon = {
@@ -2273,20 +2880,18 @@ fun ChatScreen(destination: ChatDestination?, viewModel: ChatViewModel, onBackCl
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.primary
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         },
         bottomBar = {
-            Surface(
-                tonalElevation = 4.dp,
-                color = MaterialTheme.colorScheme.surface
-            ) {
+            Surface(tonalElevation = 4.dp, color = MaterialTheme.colorScheme.surface) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(8.dp),
+                        .navigationBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedTextField(
@@ -2295,30 +2900,23 @@ fun ChatScreen(destination: ChatDestination?, viewModel: ChatViewModel, onBackCl
                         modifier = Modifier.weight(1f),
                         placeholder = { Text("Message...") },
                         shape = RoundedCornerShape(24.dp),
+                        maxLines = 4,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color.Transparent,
                             unfocusedBorderColor = Color.Transparent,
+                            focusedContainerColor = MaterialTheme.colorScheme.background,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.background,
                             cursorColor = MaterialTheme.colorScheme.primary
                         )
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(
-                        onClick = {
-                            if (messageText.isNotBlank()) {
-                                viewModel.sendMessage(messageText)
-                                messageText = ""
-                            }
-                        },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary)
+                    GradientCircleButton(
+                        icon = Icons.Default.Send,
+                        contentDescription = "Send Message",
+                        enabled = messageText.isNotBlank()
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Send,
-                            contentDescription = "Send Message",
-                            tint = MaterialTheme.colorScheme.onPrimary
-                        )
+                        viewModel.sendMessage(messageText)
+                        messageText = ""
                     }
                 }
             }
@@ -2327,44 +2925,28 @@ fun ChatScreen(destination: ChatDestination?, viewModel: ChatViewModel, onBackCl
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background),
+                .padding(paddingValues),
             state = listState,
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (messages.isEmpty()) {
                 item {
                     if (loadError != null) {
                         Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 48.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text(
-                                text = loadError ?: "",
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                                textAlign = TextAlign.Center
-                            )
+                            ErrorBanner(loadError ?: "")
                             Spacer(modifier = Modifier.height(8.dp))
-                            Button(onClick = { viewModel.retryLoad() }) {
-                                Text("Retry")
-                            }
+                            Button(onClick = { viewModel.retryLoad() }) { Text("Retry") }
                         }
                     } else {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(top = 64.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "No messages yet. Say hi!",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        EmptyState(
+                            icon = Icons.Default.Chat,
+                            title = "Say hi! 👋",
+                            subtitle = "This is the beginning of your conversation with ${destination?.otherUserName ?: "them"}."
+                        )
                     }
                 }
             }
@@ -2382,8 +2964,10 @@ fun ChatScreen(destination: ChatDestination?, viewModel: ChatViewModel, onBackCl
 @Composable
 fun ChatBubble(text: String, isSentByMe: Boolean, time: String) {
     val alignment = if (isSentByMe) Alignment.End else Alignment.Start
-    val bubbleColor = if (isSentByMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val textColor = if (isSentByMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    val bubbleShape = if (isSentByMe)
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp)
+    else
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp)
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -2391,21 +2975,17 @@ fun ChatBubble(text: String, isSentByMe: Boolean, time: String) {
     ) {
         Box(
             modifier = Modifier
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isSentByMe) 16.dp else 4.dp,
-                        bottomEnd = if (isSentByMe) 4.dp else 16.dp
-                    )
+                .clip(bubbleShape)
+                .then(
+                    if (isSentByMe) Modifier.background(BrandGradient)
+                    else Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
                 )
-                .background(bubbleColor)
-                .padding(12.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
                 .widthIn(max = 280.dp)
         ) {
             Text(
                 text = text,
-                color = textColor,
+                color = if (isSentByMe) Color.White else MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.bodyMedium
             )
         }
@@ -2413,7 +2993,7 @@ fun ChatBubble(text: String, isSentByMe: Boolean, time: String) {
             text = time,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp)
+            modifier = Modifier.padding(top = 4.dp, start = 6.dp, end = 6.dp)
         )
     }
 }
@@ -2442,16 +3022,18 @@ fun CommentsScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Comments", fontWeight = FontWeight.Bold)
+                        Text("Comments", fontWeight = FontWeight.Black)
                         Text(
                             post?.title ?: "",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 },
@@ -2461,7 +3043,7 @@ fun CommentsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.primary
                 )
             )
@@ -2471,7 +3053,8 @@ fun CommentsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(8.dp),
+                        .navigationBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedTextField(
@@ -2483,28 +3066,21 @@ fun CommentsScreen(
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color.Transparent,
                             unfocusedBorderColor = Color.Transparent,
+                            focusedContainerColor = MaterialTheme.colorScheme.background,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.background,
                             cursorColor = MaterialTheme.colorScheme.primary
                         )
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(
-                        onClick = {
-                            post?.let {
-                                viewModel.addComment(it.id, commentText, user)
-                                commentText = ""
-                            }
-                        },
-                        enabled = commentText.isNotBlank(),
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary)
+                    GradientCircleButton(
+                        icon = Icons.Default.Send,
+                        contentDescription = "Send Comment",
+                        enabled = commentText.isNotBlank()
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Send,
-                            contentDescription = "Send Comment",
-                            tint = MaterialTheme.colorScheme.onPrimary
-                        )
+                        post?.let {
+                            viewModel.addComment(it.id, commentText, user)
+                            commentText = ""
+                        }
                     }
                 }
             }
@@ -2514,36 +3090,21 @@ fun CommentsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
         ) {
-            error?.let {
-                Text(
-                    text = it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-            }
+            error?.let { ErrorBanner(it) }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 state = listState,
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 if (comments.isEmpty()) {
                     item {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(top = 48.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "No comments yet.\nBe the first to help!",
-                                textAlign = TextAlign.Center,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        EmptyState(
+                            icon = Icons.Default.Comment,
+                            title = "No comments yet",
+                            subtitle = "Be the first to share something helpful!"
+                        )
                     }
                 }
                 items(comments, key = { it.id }) { comment ->
@@ -2557,19 +3118,7 @@ fun CommentsScreen(
 @Composable
 fun CommentItem(comment: Comment) {
     Row(verticalAlignment = Alignment.Top) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.secondaryContainer),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = comment.authorName.take(1),
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                fontWeight = FontWeight.Bold
-            )
-        }
+        GradientAvatar(comment.authorName, 36.dp, MaterialTheme.typography.bodyMedium)
         Spacer(modifier = Modifier.width(12.dp))
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2594,7 +3143,7 @@ fun CommentItem(comment: Comment) {
 }
 
 // ============================================================
-// 15. CREATE POST SCREEN (photo picker → binary in DB, with errors shown)
+// 15. CREATE POST SCREEN (status cards + photo)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2616,7 +3165,6 @@ fun CreatePostScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Photo picker from gallery — failures now show a real message
     val pickImageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -2638,16 +3186,17 @@ fun CreatePostScreen(
     val pickedBitmap = rememberDecodedImage(imageBase64)
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Create Post", fontWeight = FontWeight.Bold) },
+                title = { Text("Create Post", fontWeight = FontWeight.Black) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = "Cancel Post")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = MaterialTheme.colorScheme.background,
                     titleContentColor = MaterialTheme.colorScheme.primary
                 )
             )
@@ -2657,27 +3206,28 @@ fun CreatePostScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // ---------- Photo picker (stored as binary in the database) ----------
+            // ---- Status selector cards ----
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatusSelectorCard("Lost", Icons.Default.SearchOff, statusColor("Lost"), status == "Lost", Modifier.weight(1f)) { status = "Lost" }
+                StatusSelectorCard("Found", Icons.Default.CheckCircle, statusColor("Found"), status == "Found", Modifier.weight(1f)) { status = "Found" }
+            }
+
+            // ---- Photo picker ----
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .height(190.dp)
+                    .clip(RoundedCornerShape(24.dp))
                     .clickable {
                         if (!isEncodingImage) {
                             try {
                                 pickImageLauncher.launch("image/*")
                             } catch (e: Exception) {
-                                Toast.makeText(
-                                    context,
-                                    "Couldn't open photo picker: ${e.message}",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                Toast.makeText(context, "Couldn't open photo picker: ${e.message}", Toast.LENGTH_LONG).show()
                             }
                         }
                     },
@@ -2690,32 +3240,27 @@ fun CreatePostScreen(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
-                    // Remove-photo button
-                    IconButton(
-                        onClick = { imageBase64 = "" },
+                    Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .size(32.dp)
+                            .padding(10.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.5f))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable { imageBase64 = "" },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Remove Photo",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Icon(Icons.Default.Close, contentDescription = "Remove Photo", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
                 } else {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(
-                                        MaterialTheme.colorScheme.primaryContainer,
-                                        MaterialTheme.colorScheme.secondaryContainer
+                                Brush.linearGradient(
+                                    listOf(
+                                        Color(0xFF6A5AE0).copy(alpha = 0.16f),
+                                        Color(0xFF9B5CF7).copy(alpha = 0.16f)
                                     )
                                 )
                             ),
@@ -2723,21 +3268,29 @@ fun CreatePostScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             if (isEncodingImage) {
-                                CircularProgressIndicator(modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.height(8.dp))
+                                CircularProgressIndicator(modifier = Modifier.size(30.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Text("Processing photo...", style = MaterialTheme.typography.bodySmall)
                             } else {
-                                Icon(
-                                    Icons.Default.AddAPhoto,
-                                    contentDescription = "Add Photo",
-                                    modifier = Modifier.size(40.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.AddAPhoto,
+                                        contentDescription = "Add Photo",
+                                        modifier = Modifier.size(24.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Text(
                                     "Tap to add a photo",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -2745,74 +3298,98 @@ fun CreatePostScreen(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                FilterChip(
-                    selected = status == "Lost",
-                    onClick = { status = "Lost" },
-                    label = { Text("Lost", color = if (status == "Lost") statusColor("Lost") else LocalContentColor.current) }
-                )
-                FilterChip(
-                    selected = status == "Found",
-                    onClick = { status = "Found" },
-                    label = { Text("Found", color = if (status == "Found") statusColor("Found") else LocalContentColor.current) }
-                )
-            }
-
+            // ---- Fields ----
             OutlinedTextField(
                 value = title, onValueChange = { title = it },
                 label = { Text("Item Title") },
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = location, onValueChange = { location = it },
                 label = { Text("Location") },
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = description, onValueChange = { description = it },
                 label = { Text("Description") },
                 minLines = 4,
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Button(
-                onClick = {
-                    viewModel.createPost(
-                        status, title.trim(), description.trim(),
-                        location.trim(), imageBase64, currentUser
-                    ) { success ->
-                        if (success) onPostCreated()
-                    }
-                },
-                enabled = !isPosting && !isEncodingImage &&
-                        title.isNotBlank() && description.isNotBlank() && location.isNotBlank(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            GradientButton(
+                text = "Publish Post",
+                enabled = title.isNotBlank() && description.isNotBlank() && location.isNotBlank(),
+                isLoading = isPosting || isEncodingImage
             ) {
-                if (isPosting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                } else {
-                    Text("Post", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                viewModel.createPost(
+                    status, title.trim(), description.trim(),
+                    location.trim(), imageBase64, currentUser
+                ) { success ->
+                    if (success) onPostCreated()
                 }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+fun StatusSelectorCard(
+    label: String,
+    icon: ImageVector,
+    color: Color,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = modifier.clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) color.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface
+        ),
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) color else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(26.dp))
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                label,
+                fontWeight = FontWeight.Bold,
+                color = if (selected) color else MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.titleSmall
+            )
         }
     }
 }
 
 // ============================================================
-// 16. PROFILE SCREEN (info + My Posts + Mark as Given + Delete)
+// 16. PROFILE SCREEN (animated gradient header + tinted stats)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2828,6 +3405,10 @@ fun ProfileScreen(
     var postToMark by remember { mutableStateOf<LostFoundPost?>(null) }
     var claimName by remember { mutableStateOf("") }
     var postToDelete by remember { mutableStateOf<LostFoundPost?>(null) }
+
+    val lostCount = myPosts.count { it.status.equals("Lost", true) }
+    val foundCount = myPosts.count { it.status.equals("Found", true) }
+    val givenCount = myPosts.count { it.status.equals("Given", true) }
 
     // "Mark as Given" popup
     postToMark?.let { post ->
@@ -2864,7 +3445,7 @@ fun ProfileScreen(
         )
     }
 
-    // Delete confirmation popup
+    // Delete popup
     postToDelete?.let { post ->
         AlertDialog(
             onDismissRequest = { postToDelete = null },
@@ -2884,76 +3465,84 @@ fun ProfileScreen(
         )
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("My Profile", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back to Home")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onMenuClick) {
-                        Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.primary
-                )
-            )
-        }
-    ) { paddingValues ->
-        Column(
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // ---- Animated gradient header ----
+        Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp)
+                .fillMaxWidth()
+                .background(animatedBrandGradient(vertical = true))
         ) {
-            Box(
+            Row(
                 modifier = Modifier
-                    .size(96.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .align(Alignment.CenterHorizontally),
-                contentAlignment = Alignment.Center
+                    .statusBarsPadding()
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(onClick = onBackClick) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back to Home", tint = Color.White)
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = onMenuClick) {
+                    Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                }
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 64.dp, bottom = 56.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .shadow(16.dp, CircleShape, spotColor = Color.Black.copy(alpha = 0.3f))
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.25f))
+                        .padding(5.dp)
+                ) {
+                    GradientAvatar(user?.name ?: "U", 86.dp, MaterialTheme.typography.headlineMedium)
+                }
+                Spacer(modifier = Modifier.height(14.dp))
                 Text(
-                    text = (user?.name ?: "U").take(1).uppercase(),
-                    style = MaterialTheme.typography.headlineLarge,
+                    text = user?.name ?: "Guest User",
+                    style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                    color = Color.White
+                )
+                Text(
+                    text = user?.email ?: "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.85f)
                 )
             }
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
+        Column(modifier = Modifier.padding(20.dp)) {
+            // ---- Tinted stats row ----
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatCard(lostCount, "Lost", statusColor("Lost"), Modifier.weight(1f))
+                StatCard(foundCount, "Found", statusColor("Found"), Modifier.weight(1f))
+                StatCard(givenCount, "Given", statusColor("Given"), Modifier.weight(1f))
+            }
 
-            Text(
-                text = user?.name ?: "Guest User",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
-            Text(
-                text = user?.email ?: "",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
-            )
+            Spacer(modifier = Modifier.height(20.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
-
+            // ---- Student info card ----
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     ProfileRow(icon = Icons.Default.Badge, label = "Student ID", value = user?.studentId)
                     ProfileRow(icon = Icons.Default.Numbers, label = "Roll Number", value = user?.roll)
@@ -2964,22 +3553,26 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text(
-                text = "My Posts (${myPosts.size})",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "My Posts",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "(${myPosts.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Spacer(modifier = Modifier.height(12.dp))
 
             if (myPosts.isEmpty()) {
-                Text(
-                    text = "You haven't created any posts yet.\nTap + on the Home screen to create one!",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 16.dp)
+                EmptyState(
+                    icon = Icons.Default.AutoAwesome,
+                    title = "No posts yet",
+                    subtitle = "Tap + on the Home screen to create your first post!"
                 )
             } else {
                 myPosts.forEach { post ->
@@ -2991,48 +3584,66 @@ fun ProfileScreen(
                         },
                         onDeleteClick = { postToDelete = post }
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
+@Composable
+fun StatCard(count: Int, label: String, color: Color, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.08f)),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.25f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                color = color
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+// Lost → Delete | Found → Mark as Given | Given → no buttons
 @Composable
 fun MyPostItem(
     post: LostFoundPost,
     onMarkGivenClick: () -> Unit,
     onDeleteClick: () -> Unit
 ) {
-    val isLost = post.status.equals("Lost", ignoreCase = true)
+    val status = post.status.lowercase()
     val badgeColor = statusColor(post.status)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(badgeColor.copy(alpha = 0.12f))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = post.status,
-                    color = badgeColor,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
-                )
-            }
-
+            StatusBadge(post.status, fontSize = 10)
             Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
@@ -3048,7 +3659,7 @@ fun MyPostItem(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (post.status.equals("Given", ignoreCase = true) && post.claimedByName.isNotBlank()) {
+                if (status == "given" && post.claimedByName.isNotBlank()) {
                     Text(
                         text = "✅ Given to ${post.claimedByName}",
                         style = MaterialTheme.typography.bodySmall,
@@ -3058,26 +3669,41 @@ fun MyPostItem(
                 }
             }
 
-            if (isLost) {
-                Button(
-                    onClick = onMarkGivenClick,
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = statusColor("Given")
-                    )
-                ) {
-                    Text("Mark as Given", style = MaterialTheme.typography.labelSmall)
+            when (status) {
+                "lost" -> {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.10f))
+                            .clickable { onDeleteClick() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete Post",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
-            }
-
-            IconButton(onClick = onDeleteClick, modifier = Modifier.size(32.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Delete Post",
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(18.dp)
-                )
+                "found" -> {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(statusColor("Given"))
+                            .clickable { onMarkGivenClick() }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Mark as Given",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                // "given" → nothing
             }
         }
     }
@@ -3086,13 +3712,16 @@ fun MyPostItem(
 @Composable
 fun ProfileRow(icon: ImageVector, label: String, value: String?) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(
-            icon,
-            contentDescription = label,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = label, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+        }
+        Spacer(modifier = Modifier.width(14.dp))
         Column {
             Text(
                 label,
@@ -3102,7 +3731,7 @@ fun ProfileRow(icon: ImageVector, label: String, value: String?) {
             Text(
                 value?.ifBlank { "—" } ?: "—",
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.SemiBold
             )
         }
     }
