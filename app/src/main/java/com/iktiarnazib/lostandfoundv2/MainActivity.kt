@@ -64,8 +64,8 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ServerTimestamp
 import com.google.firebase.firestore.SetOptions
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -195,27 +195,47 @@ fun rememberDecodedImage(base64: String?): Bitmap? {
     }
 }
 
-// Compress + downscale the picked photo, then encode it as a Base64
-// binary string so it fits inside a Firestore document (1MB doc limit —
-// we keep the binary under ~300KB)
-suspend fun encodeImageToBase64(context: Context, uri: Uri): String? =
+sealed interface ImageEncodeResult {
+    data class Success(val base64: String) : ImageEncodeResult
+    data class Failure(val message: String) : ImageEncodeResult
+}
+
+// Compress + downscale the picked photo, then encode as a Base64 binary
+// string that fits safely inside a Firestore document (1MB limit).
+// Reports specific errors instead of failing silently.
+suspend fun encodeImageToBase64(context: Context, uri: Uri): ImageEncodeResult =
     withContext(Dispatchers.IO) {
         try {
-            // Read dimensions first
+            // 1) Read dimensions
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            context.contentResolver.openInputStream(uri)?.use {
+            val boundsOk = context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, bounds)
-            } ?: return@withContext null
+                true
+            } ?: false
+            if (!boundsOk) {
+                return@withContext ImageEncodeResult.Failure("Couldn't read the selected file. Try a different photo.")
+            }
 
-            // Downsample during decode
+            // 2) Downsample while decoding
             var sample = 1
             while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 900) sample *= 2
             val opts = BitmapFactory.Options().apply { inSampleSize = sample }
             val bitmap = context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, opts)
-            } ?: return@withContext null
+            }
 
-            // Scale so the longest side is at most 900px
+            // 3) Fallback: if decoding failed, keep the raw bytes as-is (if small
+            //    enough) — handles formats like HEIC/WEBP the device can still render
+            if (bitmap == null) {
+                val raw = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                return@withContext if (raw != null && raw.size <= 350_000) {
+                    ImageEncodeResult.Success(Base64.encodeToString(raw, Base64.NO_WRAP))
+                } else {
+                    ImageEncodeResult.Failure("Unsupported image format or file too large. Try a JPG/PNG photo.")
+                }
+            }
+
+            // 4) Scale to max 900px longest side
             val scaled = if (bitmap.width > 900 || bitmap.height > 900) {
                 val scale = 900f / maxOf(bitmap.width, bitmap.height)
                 Bitmap.createScaledBitmap(
@@ -226,7 +246,7 @@ suspend fun encodeImageToBase64(context: Context, uri: Uri): String? =
                 )
             } else bitmap
 
-            // Compress, lowering quality until the binary is small enough
+            // 5) Compress, lowering quality until the binary is small enough
             var quality = 70
             var bytes: ByteArray
             do {
@@ -236,9 +256,13 @@ suspend fun encodeImageToBase64(context: Context, uri: Uri): String? =
                 quality -= 15
             } while (bytes.size > 300_000 && quality > 20)
 
-            Base64.encodeToString(bytes, Base64.NO_WRAP)
-        } catch (_: Exception) {
-            null
+            if (bytes.size > 400_000) {
+                return@withContext ImageEncodeResult.Failure("Photo is too large to store. Try a smaller photo.")
+            }
+
+            ImageEncodeResult.Success(Base64.encodeToString(bytes, Base64.NO_WRAP))
+        } catch (e: Exception) {
+            ImageEncodeResult.Failure("Photo error: ${e.message ?: "unknown"}")
         }
     }
 
@@ -266,6 +290,7 @@ class AuthRepository {
         awaitClose { reg.remove() }
     }
 
+    // Self-healing: if the profile doc was never created, create a basic one
     suspend fun ensureProfile(user: FirebaseUser) {
         try {
             val ref = db.collection("users").document(user.uid)
@@ -400,6 +425,7 @@ class PostRepository {
 class ChatRepository {
     private val db = FirebaseFirestore.getInstance()
 
+    // Deterministic chat ID so both users always share ONE conversation
     private fun chatIdFor(a: String, b: String) = if (a < b) "${a}_$b" else "${b}_$a"
 
     fun observeConversations(uid: String): Flow<Result<List<Conversation>>> = callbackFlow {
@@ -423,6 +449,8 @@ class ChatRepository {
     ): Result<String> = try {
         val chatId = chatIdFor(myUid, otherUid)
         val ref = db.collection("chats").document(chatId)
+        // merge-set: creates the chat if missing, refreshes participant names
+        // if it exists. No existence-check read needed, so rules stay airtight.
         ref.set(
             mapOf(
                 "participants" to listOf(myUid, otherUid),
@@ -433,6 +461,7 @@ class ChatRepository {
         Result.success(chatId)
     } catch (e: Exception) { Result.failure(e) }
 
+    // No server-side orderBy — sorted client-side
     fun observeMessages(chatId: String): Flow<Result<List<ChatMessage>>> = callbackFlow {
         val reg = db.collection("chats").document(chatId)
             .collection("messages")
@@ -608,14 +637,17 @@ class FeedViewModel : ViewModel() {
         }
     }
 
+    // Waits for the Firestore write to finish before reporting success,
+    // so the Create Post screen only navigates away when it truly saved
     fun createPost(
         status: String, title: String, description: String,
-        location: String, imageData: String, author: UserData?
+        location: String, imageData: String, author: UserData?,
+        onDone: (Boolean) -> Unit
     ) {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
         viewModelScope.launch {
             _isPosting.value = true
-            postRepo.createPost(
+            val result = postRepo.createPost(
                 LostFoundPost(
                     userId = uid,
                     username = author?.name ?: "Anonymous",
@@ -627,8 +659,14 @@ class FeedViewModel : ViewModel() {
                     description = description, location = location,
                     imageData = imageData
                 )
-            ).onFailure { _feedError.value = "Could not save post: ${it.message}" }
+            )
             _isPosting.value = false
+            result
+                .onSuccess { onDone(true) }
+                .onFailure {
+                    _feedError.value = "Could not save post: ${it.message}"
+                    onDone(false)
+                }
         }
     }
 
@@ -743,6 +781,7 @@ class ChatViewModel : ViewModel() {
         if (currentChatId == chatId && !lastAttachFailed) return
         currentChatId = chatId
         otherUserId = otherUid
+        // Never let another conversation's history show here
         _messages.value = emptyList()
         _sendError.value = null
         _loadError.value = null
@@ -866,6 +905,7 @@ fun AppNavigator() {
         } else {
             val user = currentUser
             if (user == null) {
+                // ---------- AUTH SCREENS ----------
                 when (currentScreen) {
                     Screen.SignUp -> SignUpScreen(
                         authViewModel = authViewModel,
@@ -882,6 +922,7 @@ fun AppNavigator() {
                     )
                 }
             } else {
+                // ---------- LOGGED-IN SCREENS ----------
                 val feedViewModel: FeedViewModel = viewModel(key = "feed_${user.uid}")
                 val messagesViewModel: MessagesViewModel = viewModel(key = "messages_${user.uid}")
                 val chatViewModel: ChatViewModel = viewModel(key = "chat_${user.uid}")
@@ -971,6 +1012,7 @@ fun AppNavigator() {
             }
         }
 
+        // ---------- Right-Side Drawer Scrim ----------
         AnimatedVisibility(
             visible = isDrawerOpen,
             enter = fadeIn(),
@@ -985,6 +1027,7 @@ fun AppNavigator() {
             )
         }
 
+        // ---------- Right-Side Drawer UI ----------
         AnimatedVisibility(
             visible = isDrawerOpen,
             enter = slideInHorizontally(initialOffsetX = { it }),
@@ -1726,7 +1769,7 @@ fun AuthorInfoChip(text: String) {
 }
 
 // ============================================================
-// 11. POST CARD (photo, delete, colored status)
+// 11. POST CARD (photo, owner delete, colored status)
 // ============================================================
 
 @Composable
@@ -2551,7 +2594,7 @@ fun CommentItem(comment: Comment) {
 }
 
 // ============================================================
-// 15. CREATE POST SCREEN (with photo picker → binary in DB)
+// 15. CREATE POST SCREEN (photo picker → binary in DB, with errors shown)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2573,14 +2616,20 @@ fun CreatePostScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Photo picker from gallery
+    // Photo picker from gallery — failures now show a real message
     val pickImageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
             isEncodingImage = true
             scope.launch {
-                imageBase64 = encodeImageToBase64(context, uri) ?: ""
+                when (val result = encodeImageToBase64(context, uri)) {
+                    is ImageEncodeResult.Success -> imageBase64 = result.base64
+                    is ImageEncodeResult.Failure -> {
+                        imageBase64 = ""
+                        Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                    }
+                }
                 isEncodingImage = false
             }
         }
@@ -2619,7 +2668,19 @@ fun CreatePostScreen(
                     .fillMaxWidth()
                     .height(200.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .clickable { if (!isEncodingImage) pickImageLauncher.launch("image/*") },
+                    .clickable {
+                        if (!isEncodingImage) {
+                            try {
+                                pickImageLauncher.launch("image/*")
+                            } catch (e: Exception) {
+                                Toast.makeText(
+                                    context,
+                                    "Couldn't open photo picker: ${e.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 if (pickedBitmap != null) {
@@ -2724,8 +2785,9 @@ fun CreatePostScreen(
                     viewModel.createPost(
                         status, title.trim(), description.trim(),
                         location.trim(), imageBase64, currentUser
-                    )
-                    onPostCreated()
+                    ) { success ->
+                        if (success) onPostCreated()
+                    }
                 },
                 enabled = !isPosting && !isEncodingImage &&
                         title.isNotBlank() && description.isNotBlank() && location.isNotBlank(),
