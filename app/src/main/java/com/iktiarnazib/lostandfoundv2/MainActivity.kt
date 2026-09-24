@@ -1,10 +1,17 @@
 package com.iktiarnazib.lostandfoundv2
 
+import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -32,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -57,6 +65,7 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.ServerTimestamp
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,6 +74,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -87,7 +98,7 @@ data class LostFoundPost(
     val id: String = "",
     val userId: String = "",
     val username: String = "",
-    val status: String = "",       // "Lost" or "Found"
+    val status: String = "",       // "Lost", "Found" or "Given"
     val title: String = "",
     val description: String = "",
     val location: String = "",
@@ -96,6 +107,8 @@ data class LostFoundPost(
     val authorSemester: String = "",
     val authorBatch: String = "",
     val claimedByName: String = "",
+    // Photo stored as a Base64 binary string inside the database (not Storage)
+    val imageData: String = "",
     val likes: Map<String, Boolean> = emptyMap(),
     val commentCount: Long = 0,
     @ServerTimestamp val createdAt: Timestamp? = null
@@ -133,6 +146,14 @@ data class ChatDestination(
 
 enum class Screen { Login, SignUp, ForgotPassword, Home, Messages, Chat, CreatePost, Comments, Profile }
 
+// Status colors: Lost = red, Found = blue, Given = green
+fun statusColor(status: String): Color = when (status.lowercase()) {
+    "lost" -> Color(0xFFD32F2F)
+    "found" -> Color(0xFF1976D2)
+    "given" -> Color(0xFF2E7D32)
+    else -> Color(0xFF757575)
+}
+
 fun Conversation.otherUserName(myUid: String): String =
     participantNames.entries.firstOrNull { it.key != myUid }?.value ?: "Unknown"
 
@@ -157,6 +178,69 @@ fun Timestamp?.timeAgo(): String {
 
 fun Timestamp?.toChatTime(): String =
     this?.let { SimpleDateFormat("hh:mm a", Locale.getDefault()).format(it.toDate()) } ?: ""
+
+// ============================================================
+// 1b. IMAGE HELPERS (binary/Base64 in database, no Storage)
+// ============================================================
+
+// Decode a Base64 binary string into a Bitmap (decoded once per image)
+@Composable
+fun rememberDecodedImage(base64: String?): Bitmap? {
+    return remember(base64) {
+        if (base64.isNullOrBlank()) null
+        else try {
+            val bytes = Base64.decode(base64, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (_: Exception) { null }
+    }
+}
+
+// Compress + downscale the picked photo, then encode it as a Base64
+// binary string so it fits inside a Firestore document (1MB doc limit —
+// we keep the binary under ~300KB)
+suspend fun encodeImageToBase64(context: Context, uri: Uri): String? =
+    withContext(Dispatchers.IO) {
+        try {
+            // Read dimensions first
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            } ?: return@withContext null
+
+            // Downsample during decode
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 900) sample *= 2
+            val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+            val bitmap = context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, opts)
+            } ?: return@withContext null
+
+            // Scale so the longest side is at most 900px
+            val scaled = if (bitmap.width > 900 || bitmap.height > 900) {
+                val scale = 900f / maxOf(bitmap.width, bitmap.height)
+                Bitmap.createScaledBitmap(
+                    bitmap,
+                    (bitmap.width * scale).toInt().coerceAtLeast(1),
+                    (bitmap.height * scale).toInt().coerceAtLeast(1),
+                    true
+                )
+            } else bitmap
+
+            // Compress, lowering quality until the binary is small enough
+            var quality = 70
+            var bytes: ByteArray
+            do {
+                val bos = ByteArrayOutputStream()
+                scaled.compress(Bitmap.CompressFormat.JPEG, quality, bos)
+                bytes = bos.toByteArray()
+                quality -= 15
+            } while (bytes.size > 300_000 && quality > 20)
+
+            Base64.encodeToString(bytes, Base64.NO_WRAP)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
 // ============================================================
 // 2. REPOSITORIES (Firebase logic)
@@ -252,10 +336,17 @@ class PostRepository {
         Result.success(Unit)
     } catch (e: Exception) { Result.failure(e) }
 
-    suspend fun markPostFound(postId: String, claimedByName: String): Result<Unit> = try {
+    // Only the owner can delete (enforced by rules too)
+    suspend fun deletePost(postId: String): Result<Unit> = try {
+        db.collection("posts").document(postId).delete().await()
+        Result.success(Unit)
+    } catch (e: Exception) { Result.failure(e) }
+
+    // Owner marks their Lost post as Given + records who received it
+    suspend fun markPostGiven(postId: String, claimedByName: String): Result<Unit> = try {
         db.collection("posts").document(postId).update(
             mapOf(
-                "status" to "Found",
+                "status" to "Given",
                 "claimedByName" to claimedByName
             )
         ).await()
@@ -309,7 +400,6 @@ class PostRepository {
 class ChatRepository {
     private val db = FirebaseFirestore.getInstance()
 
-    // Deterministic chat ID so both users always share ONE conversation
     private fun chatIdFor(a: String, b: String) = if (a < b) "${a}_$b" else "${b}_$a"
 
     fun observeConversations(uid: String): Flow<Result<List<Conversation>>> = callbackFlow {
@@ -343,8 +433,6 @@ class ChatRepository {
         Result.success(chatId)
     } catch (e: Exception) { Result.failure(e) }
 
-    // No server-side orderBy — sorted client-side (a server orderBy would
-    // silently exclude any message missing 'createdAt')
     fun observeMessages(chatId: String): Flow<Result<List<ChatMessage>>> = callbackFlow {
         val reg = db.collection("chats").document(chatId)
             .collection("messages")
@@ -520,7 +608,10 @@ class FeedViewModel : ViewModel() {
         }
     }
 
-    fun createPost(status: String, title: String, description: String, location: String, author: UserData?) {
+    fun createPost(
+        status: String, title: String, description: String,
+        location: String, imageData: String, author: UserData?
+    ) {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
         viewModelScope.launch {
             _isPosting.value = true
@@ -533,17 +624,30 @@ class FeedViewModel : ViewModel() {
                     authorSemester = author?.semester ?: "",
                     authorBatch = author?.batch ?: "",
                     status = status, title = title,
-                    description = description, location = location
+                    description = description, location = location,
+                    imageData = imageData
                 )
             ).onFailure { _feedError.value = "Could not save post: ${it.message}" }
             _isPosting.value = false
         }
     }
 
-    fun markPostFound(post: LostFoundPost, claimedByName: String) {
+    // Optimistic delete — disappears instantly; restored if Firestore refuses
+    fun deletePost(post: LostFoundPost) {
+        val original = _posts.value
+        _posts.value = original.filterNot { it.id == post.id }
+        viewModelScope.launch {
+            postRepo.deletePost(post.id).onFailure {
+                _posts.value = original
+                _feedError.value = "Could not delete post: ${it.message}"
+            }
+        }
+    }
+
+    fun markPostGiven(post: LostFoundPost, claimedByName: String) {
         if (claimedByName.isBlank()) return
         viewModelScope.launch {
-            postRepo.markPostFound(post.id, claimedByName)
+            postRepo.markPostGiven(post.id, claimedByName)
                 .onFailure { _feedError.value = "Could not update post: ${it.message}" }
         }
     }
@@ -615,7 +719,6 @@ class MessagesViewModel : ViewModel() {
     }
 }
 
-// CHANGED: self-healing message listener + persistent load error (not just a toast)
 class ChatViewModel : ViewModel() {
     private val chatRepo = ChatRepository()
     private val authRepo = AuthRepository()
@@ -637,12 +740,9 @@ class ChatViewModel : ViewModel() {
     private var lastAttachFailed = false
 
     fun initChat(chatId: String, otherUid: String) {
-        // Re-attach if the previous attach failed; otherwise the live
-        // listener is still running for this same chat — keep it.
         if (currentChatId == chatId && !lastAttachFailed) return
         currentChatId = chatId
         otherUserId = otherUid
-        // Never let another conversation's history show here
         _messages.value = emptyList()
         _sendError.value = null
         _loadError.value = null
@@ -663,7 +763,6 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    // Re-attach a dead/denied listener (button shown in the chat UI)
     fun retryLoad() {
         val chatId = currentChatId ?: return
         initChat(chatId, otherUserId)
@@ -830,9 +929,10 @@ fun AppNavigator() {
                     Screen.Profile -> ProfileScreen(
                         user = user,
                         myPosts = myPosts,
-                        onMarkFound = { post, claimName ->
-                            feedViewModel.markPostFound(post, claimName)
+                        onMarkGiven = { post, claimName ->
+                            feedViewModel.markPostGiven(post, claimName)
                         },
+                        onDeletePost = { post -> feedViewModel.deletePost(post) },
                         onMenuClick = { isDrawerOpen = true },
                         onBackClick = { currentScreen = Screen.Home }
                     )
@@ -862,6 +962,7 @@ fun AppNavigator() {
                             selectedPost = post
                             currentScreen = Screen.Comments
                         },
+                        onDeletePost = { post -> feedViewModel.deletePost(post) },
                         onMessageClick = { currentScreen = Screen.Messages },
                         onAddPostClick = { currentScreen = Screen.CreatePost },
                         onMenuClick = { isDrawerOpen = true }
@@ -1333,9 +1434,7 @@ fun SignUpScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) {
                 },
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
                 value = confirmPassword, onValueChange = { confirmPassword = it },
@@ -1393,7 +1492,7 @@ fun SignUpScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) {
 }
 
 // ============================================================
-// 9. HOME FEED SCREEN
+// 9. HOME FEED SCREEN (tabs: All | Lost | Given)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1408,17 +1507,18 @@ fun HomeScreen(
     onUserMessageClick: (LostFoundPost) -> Unit,
     onLikeClick: (LostFoundPost) -> Unit,
     onCommentClick: (LostFoundPost) -> Unit,
+    onDeletePost: (LostFoundPost) -> Unit,
     onMessageClick: () -> Unit,
     onAddPostClick: () -> Unit,
     onMenuClick: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var selectedTabIndex by remember { mutableStateOf(0) }
+    var selectedTabIndex by remember { mutableStateOf(0) } // 0 = All, 1 = Lost, 2 = Given
 
     val filteredPosts = remember(searchQuery, posts, selectedTabIndex) {
         val statusFilter = when (selectedTabIndex) {
             1 -> "Lost"
-            2 -> "Found"
+            2 -> "Given"
             else -> null
         }
         posts.filter { post ->
@@ -1537,7 +1637,7 @@ fun HomeScreen(
                 Tab(
                     selected = selectedTabIndex == 2,
                     onClick = { selectedTabIndex = 2 },
-                    text = { Text("Found", fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal) }
+                    text = { Text("Given", fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal) }
                 )
             }
 
@@ -1580,7 +1680,8 @@ fun HomeScreen(
                                 myUid = myUid,
                                 onMessageUser = onUserMessageClick,
                                 onLikeClick = onLikeClick,
-                                onCommentClick = onCommentClick
+                                onCommentClick = onCommentClick,
+                                onDeletePost = onDeletePost
                             )
                         }
                     }
@@ -1625,7 +1726,7 @@ fun AuthorInfoChip(text: String) {
 }
 
 // ============================================================
-// 11. POST CARD
+// 11. POST CARD (photo, delete, colored status)
 // ============================================================
 
 @Composable
@@ -1634,12 +1735,34 @@ fun PostCard(
     myUid: String,
     onMessageUser: (LostFoundPost) -> Unit,
     onLikeClick: (LostFoundPost) -> Unit,
-    onCommentClick: (LostFoundPost) -> Unit
+    onCommentClick: (LostFoundPost) -> Unit,
+    onDeletePost: (LostFoundPost) -> Unit
 ) {
     val context = LocalContext.current
     val likedByMe = post.likes[myUid] == true
     val likeCount = post.likes.size
     val commentCount = post.commentCount.toInt()
+    val isMyPost = post.userId == myUid
+
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Post", fontWeight = FontWeight.Bold) },
+            text = { Text("Delete \"${post.title}\" permanently? This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteDialog = false
+                        onDeletePost(post)
+                    }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Card(
         modifier = Modifier
@@ -1708,6 +1831,18 @@ fun PostCard(
                     )
                 }
 
+                // Delete button — visible ONLY to the post's owner
+                if (isMyPost) {
+                    IconButton(onClick = { showDeleteDialog = true }, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete Post",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
                 IconButton(onClick = { onMessageUser(post) }, modifier = Modifier.size(36.dp)) {
                     Icon(
                         imageVector = Icons.Default.Send,
@@ -1719,11 +1854,12 @@ fun PostCard(
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                val badgeColor = if (post.status == "Lost") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
+                // Status badge — red for Lost, blue for Found, green for Given
+                val badgeColor = statusColor(post.status)
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
-                        .background(badgeColor.copy(alpha = 0.1f))
+                        .background(badgeColor.copy(alpha = 0.12f))
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                     Text(
@@ -1735,26 +1871,40 @@ fun PostCard(
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .background(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primaryContainer,
-                                MaterialTheme.colorScheme.secondaryContainer
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Image,
-                    contentDescription = "Item Image",
-                    modifier = Modifier.size(64.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
+            // Item photo: decoded from the binary stored in the database,
+            // with a gradient placeholder when no photo was added
+            val decodedBitmap = rememberDecodedImage(post.imageData)
+            if (decodedBitmap != null) {
+                Image(
+                    bitmap = decodedBitmap.asImageBitmap(),
+                    contentDescription = "Item Photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .background(
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primaryContainer,
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                )
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Image,
+                        contentDescription = "No Photo",
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
+                    )
+                }
             }
 
             Column(modifier = Modifier.padding(16.dp)) {
@@ -1770,21 +1920,21 @@ fun PostCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                if (post.status.equals("Found", ignoreCase = true) && post.claimedByName.isNotBlank()) {
+                if (post.status.equals("Given", ignoreCase = true) && post.claimedByName.isNotBlank()) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.tertiary,
+                            tint = statusColor("Given"),
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Found — given to ${post.claimedByName}",
+                            text = "Given to ${post.claimedByName}",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.tertiary
+                            color = statusColor("Given")
                         )
                     }
                 }
@@ -2019,7 +2169,7 @@ fun ConversationItem(conversation: Conversation, myUid: String, onClick: () -> U
 }
 
 // ============================================================
-// 13. CHAT SCREEN (with visible load error + retry)
+// 13. CHAT SCREEN
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2142,7 +2292,6 @@ fun ChatScreen(destination: ChatDestination?, viewModel: ChatViewModel, onBackCl
         ) {
             if (messages.isEmpty()) {
                 item {
-                    // Load error — persistent, with a Retry button (no more silent emptiness)
                     if (loadError != null) {
                         Column(
                             modifier = Modifier
@@ -2402,7 +2551,7 @@ fun CommentItem(comment: Comment) {
 }
 
 // ============================================================
-// 15. CREATE POST SCREEN
+// 15. CREATE POST SCREEN (with photo picker → binary in DB)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2417,7 +2566,27 @@ fun CreatePostScreen(
     var title by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var imageBase64 by remember { mutableStateOf("") }
+    var isEncodingImage by remember { mutableStateOf(false) }
     val isPosting by viewModel.isPosting.collectAsState()
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Photo picker from gallery
+    val pickImageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            isEncodingImage = true
+            scope.launch {
+                imageBase64 = encodeImageToBase64(context, uri) ?: ""
+                isEncodingImage = false
+            }
+        }
+    }
+
+    val pickedBitmap = rememberDecodedImage(imageBase64)
 
     Scaffold(
         topBar = {
@@ -2444,39 +2613,87 @@ fun CreatePostScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // ---------- Photo picker (stored as binary in the database) ----------
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
+                    .height(200.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primaryContainer,
-                                MaterialTheme.colorScheme.secondaryContainer
-                            )
-                        )
-                    ),
+                    .clickable { if (!isEncodingImage) pickImageLauncher.launch("image/*") },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Default.Image,
-                    contentDescription = "Item Image",
-                    modifier = Modifier.size(64.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
-                )
+                if (pickedBitmap != null) {
+                    Image(
+                        bitmap = pickedBitmap.asImageBitmap(),
+                        contentDescription = "Selected Photo",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    // Remove-photo button
+                    IconButton(
+                        onClick = { imageBase64 = "" },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.5f))
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Remove Photo",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primaryContainer,
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (isEncodingImage) {
+                                CircularProgressIndicator(modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Processing photo...", style = MaterialTheme.typography.bodySmall)
+                            } else {
+                                Icon(
+                                    Icons.Default.AddAPhoto,
+                                    contentDescription = "Add Photo",
+                                    modifier = Modifier.size(40.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "Tap to add a photo",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 FilterChip(
                     selected = status == "Lost",
                     onClick = { status = "Lost" },
-                    label = { Text("Lost") }
+                    label = { Text("Lost", color = if (status == "Lost") statusColor("Lost") else LocalContentColor.current) }
                 )
                 FilterChip(
                     selected = status == "Found",
                     onClick = { status = "Found" },
-                    label = { Text("Found") }
+                    label = { Text("Found", color = if (status == "Found") statusColor("Found") else LocalContentColor.current) }
                 )
             }
 
@@ -2506,11 +2723,12 @@ fun CreatePostScreen(
                 onClick = {
                     viewModel.createPost(
                         status, title.trim(), description.trim(),
-                        location.trim(), currentUser
+                        location.trim(), imageBase64, currentUser
                     )
                     onPostCreated()
                 },
-                enabled = !isPosting && title.isNotBlank() && description.isNotBlank() && location.isNotBlank(),
+                enabled = !isPosting && !isEncodingImage &&
+                        title.isNotBlank() && description.isNotBlank() && location.isNotBlank(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -2532,7 +2750,7 @@ fun CreatePostScreen(
 }
 
 // ============================================================
-// 16. PROFILE SCREEN (info + My Posts + Mark as Found)
+// 16. PROFILE SCREEN (info + My Posts + Mark as Given + Delete)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2540,20 +2758,23 @@ fun CreatePostScreen(
 fun ProfileScreen(
     user: UserData?,
     myPosts: List<LostFoundPost>,
-    onMarkFound: (LostFoundPost, String) -> Unit,
+    onMarkGiven: (LostFoundPost, String) -> Unit,
+    onDeletePost: (LostFoundPost) -> Unit,
     onMenuClick: () -> Unit,
     onBackClick: () -> Unit
 ) {
     var postToMark by remember { mutableStateOf<LostFoundPost?>(null) }
     var claimName by remember { mutableStateOf("") }
+    var postToDelete by remember { mutableStateOf<LostFoundPost?>(null) }
 
+    // "Mark as Given" popup
     postToMark?.let { post ->
         AlertDialog(
             onDismissRequest = { postToMark = null; claimName = "" },
-            title = { Text("Mark as Found", fontWeight = FontWeight.Bold) },
+            title = { Text("Mark as Given", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text("Who was the item given to (or who found it)? Their name will be shown on the post.")
+                    Text("Who was the item given to? Their name will be shown on the post.")
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
                         value = claimName,
@@ -2568,7 +2789,7 @@ fun ProfileScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onMarkFound(post, claimName.trim())
+                        onMarkGiven(post, claimName.trim())
                         postToMark = null
                         claimName = ""
                     },
@@ -2577,6 +2798,26 @@ fun ProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { postToMark = null; claimName = "" }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Delete confirmation popup
+    postToDelete?.let { post ->
+        AlertDialog(
+            onDismissRequest = { postToDelete = null },
+            title = { Text("Delete Post", fontWeight = FontWeight.Bold) },
+            text = { Text("Delete \"${post.title}\" permanently? This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeletePost(post)
+                        postToDelete = null
+                    }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { postToDelete = null }) { Text("Cancel") }
             }
         )
     }
@@ -2682,10 +2923,11 @@ fun ProfileScreen(
                 myPosts.forEach { post ->
                     MyPostItem(
                         post = post,
-                        onMarkFoundClick = {
+                        onMarkGivenClick = {
                             postToMark = post
                             claimName = ""
-                        }
+                        },
+                        onDeleteClick = { postToDelete = post }
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                 }
@@ -2695,9 +2937,13 @@ fun ProfileScreen(
 }
 
 @Composable
-fun MyPostItem(post: LostFoundPost, onMarkFoundClick: () -> Unit) {
+fun MyPostItem(
+    post: LostFoundPost,
+    onMarkGivenClick: () -> Unit,
+    onDeleteClick: () -> Unit
+) {
     val isLost = post.status.equals("Lost", ignoreCase = true)
-    val badgeColor = if (isLost) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
+    val badgeColor = statusColor(post.status)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -2740,27 +2986,36 @@ fun MyPostItem(post: LostFoundPost, onMarkFoundClick: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (!isLost && post.claimedByName.isNotBlank()) {
+                if (post.status.equals("Given", ignoreCase = true) && post.claimedByName.isNotBlank()) {
                     Text(
                         text = "✅ Given to ${post.claimedByName}",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.tertiary
+                        color = statusColor("Given")
                     )
                 }
             }
 
             if (isLost) {
                 Button(
-                    onClick = onMarkFoundClick,
+                    onClick = onMarkGivenClick,
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.tertiary
+                        containerColor = statusColor("Given")
                     )
                 ) {
-                    Text("Mark as Found", style = MaterialTheme.typography.labelSmall)
+                    Text("Mark as Given", style = MaterialTheme.typography.labelSmall)
                 }
+            }
+
+            IconButton(onClick = onDeleteClick, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete Post",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
