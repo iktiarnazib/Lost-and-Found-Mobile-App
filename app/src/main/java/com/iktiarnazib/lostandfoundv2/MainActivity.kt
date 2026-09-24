@@ -310,11 +310,17 @@ suspend fun encodeImageToBase64(context: Context, uri: Uri): ImageEncodeResult =
     }
 
 // ============================================================
-// 1c. FINDORA THEME + SHARED UI COMPONENTS
+// 1c. FINDORA THEME (logo pink palette) + SHARED UI COMPONENTS
 // ============================================================
 
+// ---- Brand palette, matched to the Findora logo ----
+val BrandPinkDeep = Color(0xFFE0246E)   // deep hot pink (logo shadow pink)
+val BrandPink = Color(0xFFF43F7F)       // the logo's main pink
+val BrandPinkLight = Color(0xFFFF7FAE)  // soft pink highlight
+val BrandPinkSoft = Color(0xFFFFD9E6)   // very light pink for containers
+
 private val BrandGradient = Brush.linearGradient(
-    listOf(Color(0xFF6A5AE0), Color(0xFF9B5CF7))
+    listOf(BrandPinkDeep, BrandPinkLight)
 )
 
 // Slowly shifting brand gradient — used on splash, login hero, profile, drawer
@@ -330,50 +336,50 @@ fun animatedBrandGradient(vertical: Boolean = false): Brush {
         ),
         label = "shift"
     )
-    val c1 = lerp(Color(0xFF6A5AE0), Color(0xFF9B5CF7), shift)
-    val c2 = lerp(Color(0xFF9B5CF7), Color(0xFF6A5AE0), shift)
+    val c1 = lerp(BrandPinkDeep, BrandPinkLight, shift)
+    val c2 = lerp(BrandPinkLight, BrandPinkDeep, shift)
     return if (vertical) Brush.verticalGradient(listOf(c1, c2))
     else Brush.linearGradient(listOf(c1, c2))
 }
 
 private val FindoraLight = lightColorScheme(
-    primary = Color(0xFF5B5BD6),
+    primary = BrandPinkDeep,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE5E3FF),
-    onPrimaryContainer = Color(0xFF1A1A6E),
-    secondary = Color(0xFF5B5B72),
-    secondaryContainer = Color(0xFFE2E1F2),
-    onSecondaryContainer = Color(0xFF191A2C),
+    primaryContainer = BrandPinkSoft,
+    onPrimaryContainer = Color(0xFF5C0A2E),
+    secondary = Color(0xFF745560),
+    secondaryContainer = Color(0xFFFFDCE8),
+    onSecondaryContainer = Color(0xFF2B1219),
     tertiary = Color(0xFF1F9D55),
     tertiaryContainer = Color(0xFFD3F5E2),
-    background = Color(0xFFF6F5FB),
-    onBackground = Color(0xFF1A1A24),
+    background = Color(0xFFFDF4F7),          // pink-tinted off-white
+    onBackground = Color(0xFF221218),
     surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF1A1A24),
-    surfaceVariant = Color(0xFFE8E5F3),
-    onSurfaceVariant = Color(0xFF6B6880),
-    outline = Color(0xFFC9C5DC),
+    onSurface = Color(0xFF221218),
+    surfaceVariant = Color(0xFFF9E2EB),
+    onSurfaceVariant = Color(0xFF745560),
+    outline = Color(0xFFE5B8C8),
     error = Color(0xFFE04B4B),
     errorContainer = Color(0xFFFFE4E4)
 )
 
 private val FindoraDark = darkColorScheme(
-    primary = Color(0xFFBEBBFF),
-    onPrimary = Color(0xFF252578),
-    primaryContainer = Color(0xFF3C3CA8),
-    onPrimaryContainer = Color(0xFFE5E3FF),
-    secondary = Color(0xFFC4C3DD),
-    secondaryContainer = Color(0xFF34344C),
-    onSecondaryContainer = Color(0xFFE0E0F5),
+    primary = Color(0xFFFF8AB4),
+    onPrimary = Color(0xFF5C0A2E),
+    primaryContainer = Color(0xFF8C1B4B),
+    onPrimaryContainer = BrandPinkSoft,
+    secondary = Color(0xFFE0BDC9),
+    secondaryContainer = Color(0xFF4A2B36),
+    onSecondaryContainer = Color(0xFFFFDCE8),
     tertiary = Color(0xFF6FE0A0),
     tertiaryContainer = Color(0xFF14532D),
-    background = Color(0xFF0F0F19),
-    onBackground = Color(0xFFE5E4F0),
-    surface = Color(0xFF181826),
-    onSurface = Color(0xFFE5E4F0),
-    surfaceVariant = Color(0xFF26263A),
-    onSurfaceVariant = Color(0xFFC7C4D8),
-    outline = Color(0xFF47455F),
+    background = Color(0xFF190D12),          // deep pink-black
+    onBackground = Color(0xFFF3DEE6),
+    surface = Color(0xFF24141B),
+    onSurface = Color(0xFFF3DEE6),
+    surfaceVariant = Color(0xFF3A222C),
+    onSurfaceVariant = Color(0xFFD3C0C8),
+    outline = Color(0xFF5F404C),
     error = Color(0xFFFF7B7B),
     errorContainer = Color(0xFF4A1D1D)
 )
@@ -405,7 +411,7 @@ fun GradientButton(
         modifier = Modifier
             .fillMaxWidth()
             .height(54.dp)
-            .shadow(if (enabled) 10.dp else 0.dp, RoundedCornerShape(18.dp), spotColor = Color(0xFF6A5AE0))
+            .shadow(if (enabled) 10.dp else 0.dp, RoundedCornerShape(18.dp), spotColor = BrandPinkDeep)
             .clip(RoundedCornerShape(18.dp))
             .background(bg)
             .clickable(enabled = enabled && !isLoading) { onClick() },
@@ -439,8 +445,8 @@ fun GradientCircleButton(
     val bg = if (enabled) BrandGradient
     else Brush.linearGradient(
         listOf(
-            Color(0xFF6A5AE0).copy(alpha = 0.35f),
-            Color(0xFF9B5CF7).copy(alpha = 0.35f)
+            BrandPinkDeep.copy(alpha = 0.35f),
+            BrandPinkLight.copy(alpha = 0.35f)
         )
     )
     Box(
@@ -462,7 +468,7 @@ fun GradientAvatar(name: String, size: Dp, textStyle: androidx.compose.ui.text.T
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
-            .background(Brush.linearGradient(listOf(Color(0xFF6A5AE0), Color(0xFFB15CF7)))),
+            .background(Brush.linearGradient(listOf(BrandPinkDeep, Color(0xFFFF9EC0)))),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -1452,7 +1458,7 @@ fun BottomNavItem(
                         .offset(x = 7.dp, y = (-3).dp)
                         .size(18.dp)
                         .clip(CircleShape)
-                        .background(statusColor("Lost")),
+                        .background(BrandPinkDeep),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -1474,7 +1480,7 @@ fun BottomNavItem(
 }
 
 // ============================================================
-// 5. DRAWER (animated gradient header)
+// 5. DRAWER (animated pink gradient header)
 // ============================================================
 
 @Composable
@@ -1587,7 +1593,7 @@ fun DrawerItem(
 }
 
 // ============================================================
-// 6. LOGIN SCREEN (animated hero + sheet form)
+// 6. LOGIN SCREEN (animated pink hero + sheet form)
 // ============================================================
 
 @Composable
@@ -1653,7 +1659,7 @@ fun LoginScreen(authViewModel: AuthViewModel, onSignUpClick: () -> Unit, onForgo
                 Text(
                     "Lost something? Found something? Start here.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.85f)
+                    color = Color.White.copy(alpha = 0.9f)
                 )
             }
         }
@@ -1802,7 +1808,7 @@ fun ForgotPasswordScreen(authViewModel: AuthViewModel, onBackClick: () -> Unit) 
             Box(
                 modifier = Modifier
                     .size(110.dp)
-                    .shadow(16.dp, CircleShape, spotColor = Color(0xFF6A5AE0))
+                    .shadow(16.dp, CircleShape, spotColor = BrandPinkDeep)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
@@ -2092,7 +2098,7 @@ fun HomeScreen(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(42.dp)
-                        .shadow(6.dp, CircleShape, spotColor = Color(0xFF6A5AE0))
+                        .shadow(6.dp, CircleShape, spotColor = BrandPinkDeep)
                         .clip(CircleShape)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -2125,7 +2131,7 @@ fun HomeScreen(
             Box(
                 modifier = Modifier
                     .size(58.dp)
-                    .shadow(10.dp, CircleShape, spotColor = Color(0xFF6A5AE0))
+                    .shadow(10.dp, CircleShape, spotColor = BrandPinkDeep)
                     .clip(CircleShape)
                     .background(BrandGradient)
                     .clickable(onClick = onAddPostClick),
@@ -2214,7 +2220,7 @@ fun HomeScreen(
     }
 }
 
-// FIXED for all M3 versions: no leadingIconColor / custom border block
+// Version-safe FilterChip colors (works with all M3 versions)
 @Composable
 fun FilterPill(
     label: String,
@@ -2471,8 +2477,8 @@ fun PostCard(
                             .background(
                                 Brush.linearGradient(
                                     listOf(
-                                        Color(0xFF6A5AE0).copy(alpha = 0.18f),
-                                        Color(0xFF9B5CF7).copy(alpha = 0.18f)
+                                        BrandPinkDeep.copy(alpha = 0.16f),
+                                        BrandPinkLight.copy(alpha = 0.16f)
                                     )
                                 )
                             ),
@@ -2683,7 +2689,7 @@ fun PostInteraction(
 }
 
 // ============================================================
-// 12. MESSAGES SCREEN (cards with unread highlight)
+// 12. MESSAGES SCREEN
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2820,7 +2826,7 @@ fun ConversationItem(conversation: Conversation, myUid: String, onClick: () -> U
 }
 
 // ============================================================
-// 13. CHAT SCREEN (gradient bubbles, pulsing presence)
+// 13. CHAT SCREEN (pink gradient bubbles, pulsing presence)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -3143,7 +3149,7 @@ fun CommentItem(comment: Comment) {
 }
 
 // ============================================================
-// 15. CREATE POST SCREEN (status cards + photo)
+// 15. CREATE POST SCREEN (pink status cards + photo)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -3259,8 +3265,8 @@ fun CreatePostScreen(
                             .background(
                                 Brush.linearGradient(
                                     listOf(
-                                        Color(0xFF6A5AE0).copy(alpha = 0.16f),
-                                        Color(0xFF9B5CF7).copy(alpha = 0.16f)
+                                        BrandPinkDeep.copy(alpha = 0.14f),
+                                        BrandPinkLight.copy(alpha = 0.14f)
                                     )
                                 )
                             ),
@@ -3389,7 +3395,7 @@ fun StatusSelectorCard(
 }
 
 // ============================================================
-// 16. PROFILE SCREEN (animated gradient header + tinted stats)
+// 16. PROFILE SCREEN (pink animated gradient header + tinted stats)
 // ============================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
